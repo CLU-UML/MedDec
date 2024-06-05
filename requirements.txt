@@ -1,0 +1,5 @@
+argparse
+numpy
+pandas
+torch==1.13.1
+transformers==4.38.1
