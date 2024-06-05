@@ -191,15 +191,15 @@ def calc_metrics_spans(ys, preds, t2cs, fn_map = None):
 
     return f1, all_preds, all_ys, perclass
 
-def save_losses(model, model_B, crit, train_dataloader, val_dataloader, test_dataloader):
-    train_losses = evaluate(model, model_B, train_dataloader, crit, return_losses = True)
+def save_losses(model, crit, train_dataloader, val_dataloader, test_dataloader):
+    train_losses = evaluate(model, train_dataloader, crit, return_losses = True)
     all_losses['train'].append(train_losses)
-    val_losses = evaluate(model, model_B, val_dataloader, crit, return_losses = True)
+    val_losses = evaluate(model, val_dataloader, crit, return_losses = True)
     all_losses['val'].append(val_losses)
-    test_losses = evaluate(model, model_B, test_dataloader, crit, return_losses = True)
+    test_losses = evaluate(model, test_dataloader, crit, return_losses = True)
     all_losses['test'].append(test_losses)
 
-def evaluate(model, model_B, dataloader, crit, return_losses = False, return_preds = False, fn_map = None):
+def evaluate(model, dataloader, crit, return_losses = False, return_preds = False, fn_map = None):
     model.eval()
     outs, ys = [], []
     outs2 = []
@@ -216,9 +216,6 @@ def evaluate(model, model_B, dataloader, crit, return_losses = False, return_pre
 
         with torch.no_grad():
             logits = model.generate(x, mask)
-            if args.distil:
-                logits2 = model_B.generate(x, mask)
-                outs2.append(logits2)
 
         outs.append(logits)
         lens.extend([x.shape[0] for x in logits])
@@ -390,7 +387,7 @@ def predict_mimic(model, data, tokenizer):
     # for sample in tqdm(data):
     #     process(sample)
 
-def train(args, model, model_B, crit, optimizer, lr_scheduler,
+def train(args, model, crit, optimizer, lr_scheduler,
         train_dataloader, val_dataloader, verbose=True, train_ns=None, test_dataloader=None):
     writer = aim.Run(experiment=args.aim_exp, repo=args.aim_repo, 
             system_tracking_interval=0) if not args.debug else None
@@ -406,7 +403,6 @@ def train(args, model, model_B, crit, optimizer, lr_scheduler,
     best_perclass = None
     train_iter = iter(train_dataloader)
     losses = []
-    distil_losses = []
     while step < args.total_steps:
         batch = next(train_iter, None)
         if batch is None:
@@ -422,12 +418,8 @@ def train(args, model, model_B, crit, optimizer, lr_scheduler,
             out, _ = model.phenos(x, mask)
             logits = out[1]
             att = out[0].attentions[-1]
-            if args.distil:
-                out_B, _ = model_B.decisions(x, mask)
         elif args.task == 'token':
             out, logits = model.decisions(x, mask)
-            if args.distil:
-                out_B, _ = model_B.decisions(x, mask)
 
         # bs, num_heads, k, q = att.shape
         # scores = [[] for _ in range(args.num_decs+1)]
@@ -450,65 +442,12 @@ def train(args, model, model_B, crit, optimizer, lr_scheduler,
                 loss = crit(logits.view(-1, args.num_labels), y.view(-1)).mean()
         else:
             loss = crit(logits, y).mean()
-        if args.distil:
-            distil_loss = ((out.last_hidden_state - out_B.last_hidden_state)**2).mean(1).mean(0)
-            if args.distil_att:
-                distil_loss *= model.distil_att
-            distil_loss = distil_loss.mean()
-            # if step == 0:
-            #     weights = torch.ones(1).to(loss.device)
-            #     weights = torch.nn.Parameter(weights)
-            #     T = weights.sum().detach() # sum of weights
-            #     # set optimizer for weights
-            #     lr2 = 1e-4
-            #     alpha=0.12
-            #     optimizer2 = torch.optim.Adam([weights], lr=lr2)
-            #     # set L(0)
-            #     l0 = loss.detach()
-            #     l0_distil = distil_loss.detach()
-            # total_loss = loss + args.alpha_distil * distil_loss * weights[0]
-            total_loss = loss + args.alpha_distil * distil_loss
-
-            distil_losses.append(distil_loss.item())
-        else:
-            total_loss = loss
+        total_loss = loss
 
 
         losses.append(loss.item())
         total_loss /= args.grad_accumulation
         total_loss.backward(retain_graph=True)
-        
-        # if args.distil:
-        #     gw = []
-            
-        #     dl = torch.autograd.grad(loss, model.backbone.encoder.parameters(), retain_graph=True, create_graph=True)[0]
-        #     gw.append(torch.norm(dl))
-        #     dl = torch.autograd.grad(weights[0]*distil_loss, model.backbone.encoder.parameters(), retain_graph=True, create_graph=True)[0]
-        #     gw.append(torch.norm(dl))
-            
-        #     gw = torch.stack(gw)
-        #     # compute loss ratio per task
-        #     loss_ratio = loss.detach() / l0
-        #     distil_loss_ratio = distil_loss.detach() / l0_distil
-        #     # compute the relative inverse training rate per task
-        #     loss_ratio_mean = (loss_ratio + distil_loss_ratio) / 2
-        #     rt = loss_ratio / loss_ratio_mean
-        #     rt_distil = distil_loss_ratio / loss_ratio_mean
-        #     rt = torch.stack([rt, rt_distil])
-        #     # compute the average gradient norm
-        #     gw_avg = gw.mean().detach()
-        #     # compute the GradNorm loss
-        #     constant = (gw_avg * rt ** alpha).detach()
-        #     gradnorm_loss = torch.abs(gw - constant).sum()
-        #     # clear gradients of weights
-        #     optimizer2.zero_grad()
-        #     # backward pass for GradNorm
-        #     gradnorm_loss.backward()
-        #     optimizer2.step()
-        #     # renormalize weights
-        #     weights = (weights / weights.sum() * T).detach()
-        #     weights = torch.nn.Parameter(weights)
-        #     optimizer2 = torch.optim.Adam([weights], lr=lr2)
         
         if (step+1) % args.grad_accumulation == 0:
             optimizer.step()
@@ -523,18 +462,10 @@ def train(args, model, model_B, crit, optimizer, lr_scheduler,
                 writer.track(avg_loss, name='bce_loss', context={'split': 'train'}, step = step)
             losses = []
 
-            if args.distil:
-                avg_distil_loss = np.mean(distil_losses)
-                if verbose:
-                    print('distil loss:', avg_distil_loss)
-                if writer is not None:
-                    writer.track(avg_distil_loss, name='distil_loss', context={'split': 'train'}, step = step)
-                distil_losses = []
-
         if len(val_dataloader) > 0 and step % (args.val_log*args.grad_accumulation) == 0:
             if args.save_losses:
-                save_losses(model, model_B, crit, train_ns, val_dataloader, test_dataloader)
-            metrics_out, pheno_results, loss = evaluate(model, model_B, val_dataloader, crit)
+                save_losses(model, crit, train_ns, val_dataloader, test_dataloader)
+            metrics_out, pheno_results, loss = evaluate(model, val_dataloader, crit)
             f1, acc = metrics_out['f1'], metrics_out['acc']
             if verbose:
                 print('[step: {:5d}] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
@@ -575,24 +506,21 @@ def main(args):
         torch.manual_seed(seed)
         np.random.seed(seed)
         args.seed = seed
-        if args.mimic_data:
-            data, tokenizer = load_data(args)
-        else:
-            train_dataloader, val_dataloader, test_dataloader, train_ns, files = load_data(args)
-        model, crit, optimizer, lr_scheduler, model_B = load_model(args, device)
+        train_dataloader, val_dataloader, test_dataloader, train_ns, files = load_data(args)
+        model, crit, optimizer, lr_scheduler = load_model(args, device)
 
         if not args.eval_only:
-            f1, acc, step = train(args, model, model_B, crit, 
+            f1, acc, step = train(args, model, crit, 
                     optimizer, lr_scheduler, train_dataloader,
                     val_dataloader, args.verbose, train_ns, test_dataloader)
-            # metrics_out, pheno_results, loss = evaluate(model, model_B, test_dataloader, crit)
+            # metrics_out, pheno_results, loss = evaluate(model, test_dataloader, crit)
             # exit()
             f1s.append(f1)
             print('seed: %d, F1: %.1f, Acc: %.1f'%(seed, f1, acc))
             # Test
             test_files = files[2]
             fn_map = {i: fn for i, fn in enumerate(test_files)}
-            metrics_out, pheno_results, loss = evaluate(model, model_B, test_dataloader, crit, fn_map=fn_map)
+            metrics_out, pheno_results, loss = evaluate(model, test_dataloader, crit, fn_map=fn_map)
             f1, acc = metrics_out['f1'], metrics_out['acc']
             print('[Test] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
                     .format(f1, acc, loss))
@@ -600,19 +528,19 @@ def main(args):
         else:
             model.eval()
             # Train
-            metrics_out, pheno_results, loss = evaluate(model, model_B, train_ns, crit)
+            metrics_out, pheno_results, loss = evaluate(model, train_ns, crit)
             f1, acc = metrics_out['f1'], metrics_out['acc']
             print('[Train] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
                     .format(f1, acc, loss))
             # Val
-            # metrics_out, pheno_results, loss = evaluate(model, model_B, val_dataloader, crit)
+            # metrics_out, pheno_results, loss = evaluate(model, val_dataloader, crit)
             # f1, acc = metrics_out['f1'], metrics_out['acc']
             # print('[Val] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
             #         .format(f1, acc, loss))
             # Test
             # test_files = files[2]
             # fn_map = {i: fn for i, fn in enumerate(test_files)}
-            # metrics_out, pheno_results, loss, perclass = evaluate(model, model_B, test_dataloader, crit, fn_map=fn_map)
+            # metrics_out, pheno_results, loss, perclass = evaluate(model, test_dataloader, crit, fn_map=fn_map)
             # f1, acc = metrics_out['f1'], metrics_out['acc']
             # print('[Test] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
             #         .format(f1, acc, loss))

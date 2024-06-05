@@ -25,19 +25,11 @@ pheno_map = {'alcohol.abuse': 0,
 rev_pheno_map = {v: k for k,v in pheno_map.items()}
 valid_cats = range(0,9)
 
-umls_cats = ['T114', 'T029', 'T073', 'T058', 'T191', 'T200', 'T048', 'T019', 'T046', 'T023', 'T041', 'T059', 'T184', 'T034', 'T116', 'T039', 'T127', 'T201', 'T129', 'T067', 'T109', 'T197', 'T131', 'T130', 'T126', 'T061', 'T203', 'T047', 'T037', 'T074', 'T031', 'T195', 'T168'] 
-umls_map = {s: i for i,s in enumerate(umls_cats)}
-
-meddec_stats = pd.read_csv('/data/mohamed/data/mimic_decisions/stats.csv').set_index(['SUBJECT_ID', 'HADM_ID', 'ROW_ID'])
-
 def gen_splits(args, phenos):
     np.random.seed(0)
     if args.task == 'token':
-        files = glob(os.path.join(args.data_dir, 'mimic_decisions/data/**/*'))
-        if args.use_umls:
-            files = ["/".join(x.split('/')[-1:]) for x in files]
-        else:
-            files = ["/".join(x.split('/')[-2:]) for x in files]
+        files = glob(os.path.join(args.data_dir, 'data/**/*'))
+        files = ["/".join(x.split('/')[-2:]) for x in files]
         subjects = np.unique([os.path.basename(x).split('_')[0] for x in files])
     elif phenos is not None:
         subjects = phenos['subject_id'].unique()
@@ -136,6 +128,7 @@ class MyDataset(Dataset):
         self.train = train
         self.pheno_ids = defaultdict(list)
         self.dec_ids = {k: [] for k in pheno_map.keys()}
+        self.meddec_stats = pd.read_csv(os.path.join(args.data_dir, 'stats.csv')).set_index(['SUBJECT_ID', 'HADM_ID', 'ROW_ID'])
         self.stats = defaultdict(list)
 
         if args.task == 'seq':
@@ -152,29 +145,15 @@ class MyDataset(Dataset):
 
     def load_phenos(self, args, row, idx):
         txt_candidates = glob(os.path.join(args.data_dir,
-            f'mimic_decisions/raw_text/{row["subject_id"]}_{row["hadm_id"]}*.txt'))
+            f'raw_text/{row["subject_id"]}_{row["hadm_id"]}*.txt'))
         text = open(txt_candidates[0]).read()
         if args.pheno_n == 500:
 
             file_dir = glob(os.path.join(args.data_dir,
-                f'mimic_decisions/data/*/{row["subject_id"]}_{row["hadm_id"]}*.json'))[0]
+                f'data/*/{row["subject_id"]}_{row["hadm_id"]}*.json'))[0]
             with open(file_dir) as f:
                 data = json.load(f, strict=False)
             annots = data[0]['annotations']
-
-            if args.text_subset:
-                unlabeled_text = np.ones(len(text), dtype=bool)
-                labeled_text = np.zeros(len(text), dtype=bool)
-                for annot in annots:
-                    cat = parse_cat(annot['category'])
-                    start, end = map(int, (annot['start_offset'], annot['end_offset']))
-                    if cat is not None:
-                        unlabeled_text[start:end] = 0
-                    if cat in args.text_subset:
-                        labeled_text[start:end] = 1
-
-                combined_text = unlabeled_text | labeled_text if args.include_nolabel else labeled_text
-                text = "".join([c for i,c in enumerate(text) if combined_text[i]])
 
             encoding = self.tokenizer.encode_plus(text,
                     truncation=args.truncate_train if self.train else args.truncate_eval)
@@ -231,14 +210,11 @@ class MyDataset(Dataset):
 
     def load_decisions(self, args, fn, idx, phenos):
         basename = os.path.basename(fn).split("-")[0]
-        if args.use_umls:
-            file_dir = os.path.join(args.data_dir, 'mimic_decisions/umls', basename)
-        else:
-            file_dir = os.path.join(args.data_dir, 'mimic_decisions/data', fn)
+        file_dir = os.path.join(args.data_dir, 'data', fn)
 
         pheno_id = "_".join(basename.split("_")[:3]) + '.txt'
         txt_candidates = glob(os.path.join(args.data_dir,
-            f'mimic_decisions/raw_text/{basename}*.txt'))
+            f'raw_text/{basename}*.txt'))
         text = open(txt_candidates[0]).read()
         encoding = self.tokenizer.encode_plus(text,
                 max_length=args.max_len,
@@ -253,10 +229,7 @@ class MyDataset(Dataset):
 
         with open(file_dir) as f:
             data = json.load(f, strict=False)
-        if args.use_umls:
-            annots = data
-        else:
-            annots = data[0]['annotations']
+        annots = data[0]['annotations']
             
         if args.label_encoding == 'multiclass':
             labels = np.full(len(encoding['input_ids']), args.num_labels-1, dtype=int)
@@ -289,13 +262,10 @@ class MyDataset(Dataset):
             if enc_start is None or enc_end is None:
                 raise ValueError
 
-            if args.use_umls:
-                cat = umls_map.get(annot['category'], None)
-            else:
-                cat = parse_cat(annot['category'])
-                if cat:
-                    cat -= 1
-            if cat is None or (not args.use_umls and cat not in valid_cats):
+            cat = parse_cat(annot['category'])
+            if cat:
+                cat -= 1
+            if cat is None or cat not in valid_cats:
                 continue
 
             if args.label_encoding == 'multiclass':
@@ -356,19 +326,17 @@ def parse_cat(cat):
 
 def load_phenos(args):
     if args.pheno_n == 500:
-        phenos = pd.read_csv(os.path.join(args.data_dir,
-            'mimic_decisions/phenos500'),
-            sep='\t').rename(lambda x: x.strip(), axis=1)
+        phenos = pd.read_csv(args.pheno_path, sep='\t').rename(lambda x: x.strip(), axis=1)
         phenos['raw_text'] = phenos['raw_text'].apply(lambda x: os.path.basename(x))
         phenos[['SUBJECT_ID', 'HADM_ID', 'ROW_ID']] = \
             [os.path.splitext(x)[0].split('_')[:3] for x in phenos['raw_text']]
         phenos = phenos[phenos['phenotype_label'] != '?']
     elif args.pheno_n == 800:
-        phenos = pd.read_csv(os.path.join(args.data_dir, 'mimic_decisions/phenos800.csv'))
+        phenos = pd.read_csv(args.pheno_path)
         phenos.rename({'Ham_ID': 'HADM_ID'}, inplace=True, axis=1)
         phenos = phenos[phenos.phenotype_label != '?']
     elif args.pheno_n == 1500:
-        phenos = pd.read_csv(os.path.join(args.data_dir, 'mimic_decisions/phenos1500.csv'))
+        phenos = pd.read_csv(args.pheno_path)
         phenos.rename({'Hospital.Admission.ID': 'HADM_ID',
             'subject.id': 'SUBJECT_ID'}, inplace=True, axis=1)
         phenos = phenos[phenos.Unsure != 1]
@@ -376,7 +344,7 @@ def load_phenos(args):
                                         | phenos['Developmental.Delay.Retardation']\
                                         | phenos['Schizophrenia.and.other.Psychiatric.Disorders']
     else:
-        raise ValueError
+        raise NotImplementedError("Please provide the phenotypes file")
     phenos.rename(lambda k: k.lower(), inplace=True, axis = 1)
     return phenos
 
@@ -485,59 +453,52 @@ def load_data(args):
     args.vocab_size = tokenizer.vocab_size
     args.max_length = min(tokenizer.model_max_length, 512)
 
-    if args.mimic_data:
-        from datasets import Dataset
-        df = pd.read_csv('/data/mohamed/data/mimiciii/NOTEEVENTS.csv.gz',
-                usecols=['ROW_ID', 'SUBJECT_ID', 'HADM_ID', 'TEXT'])
-        data = Dataset.from_pandas(df)
-        return data, tokenizer
-    else:
-        phenos = load_phenos(args)
-        train_files, val_files, test_files = gen_splits(args, phenos)
-        phenos.set_index('raw_text', inplace=True)
+    phenos = load_phenos(args)
+    train_files, val_files, test_files = gen_splits(args, phenos)
+    phenos.set_index('raw_text', inplace=True)
 
-        train_dataset = MyDataset(args, tokenizer, train_files, phenos, train=True)
-        val_dataset = MyDataset(args, tokenizer, val_files, phenos)
-        test_dataset = MyDataset(args, tokenizer, test_files, phenos)
-        # test_dataset = MyDataset(args, tokenizer, train_files, phenos)
+    train_dataset = MyDataset(args, tokenizer, train_files, phenos, train=True)
+    val_dataset = MyDataset(args, tokenizer, val_files, phenos)
+    test_dataset = MyDataset(args, tokenizer, test_files, phenos)
+    # test_dataset = MyDataset(args, tokenizer, train_files, phenos)
 
-        # import json
-        # d = json.load(open('token_losses.json'))
-        # j = 0
-        # for i in range(len(test_dataset)):
-        #     tokens = tokenizer.convert_ids_to_tokens(test_dataset[i]['input_ids'])
-        #     spans = test_dataset[i]['all_spans'][0]
-        #     fn = test_dataset[i]['file_name']
-        #     for span in spans:
-        #         start = span['token_start']
-        #         end = span['token_end']
-        #         d[j]['tokens'] = tokens[start:end]
-        #         d[j]['file_name'] = fn
-        #         d[j]['span'] = span
-        #         j += 1
-        # json.dump(d, open('token_losses.json', 'w'))
-        # exit()
+    # import json
+    # d = json.load(open('token_losses.json'))
+    # j = 0
+    # for i in range(len(test_dataset)):
+    #     tokens = tokenizer.convert_ids_to_tokens(test_dataset[i]['input_ids'])
+    #     spans = test_dataset[i]['all_spans'][0]
+    #     fn = test_dataset[i]['file_name']
+    #     for span in spans:
+    #         start = span['token_start']
+    #         end = span['token_end']
+    #         d[j]['tokens'] = tokens[start:end]
+    #         d[j]['file_name'] = fn
+    #         d[j]['span'] = span
+    #         j += 1
+    # json.dump(d, open('token_losses.json', 'w'))
+    # exit()
 
-        if args.resample == 'down':
-            downsample(train_dataset)
-        elif args.resample == 'up':
-            upsample(train_dataset)
+    if args.resample == 'down':
+        downsample(train_dataset)
+    elif args.resample == 'up':
+        upsample(train_dataset)
 
-        print('Train dataset:', len(train_dataset))
-        print('Val dataset:', len(val_dataset))
-        print('Test dataset:', len(test_dataset))
+    print('Train dataset:', len(train_dataset))
+    print('Val dataset:', len(val_dataset))
+    print('Test dataset:', len(test_dataset))
 
-        train_ns = DataLoader(train_dataset, 1, False,
-                collate_fn=collate_full,
-                )
-        train_dataloader = DataLoader(train_dataset, args.batch_size, True,
-                collate_fn=collate_segment,
-                )
-        val_dataloader = DataLoader(val_dataset, 1, False, collate_fn=collate_full)
-        test_dataloader = DataLoader(test_dataset, 1, False, collate_fn=collate_full)
+    train_ns = DataLoader(train_dataset, 1, False,
+            collate_fn=collate_full,
+            )
+    train_dataloader = DataLoader(train_dataset, args.batch_size, True,
+            collate_fn=collate_segment,
+            )
+    val_dataloader = DataLoader(val_dataset, 1, False, collate_fn=collate_full)
+    test_dataloader = DataLoader(test_dataset, 1, False, collate_fn=collate_full)
 
-        train_files = [os.path.basename(x).split('-')[0] for x in train_files]
-        val_files = [os.path.basename(x).split('-')[0] for x in val_files]
-        test_files = [os.path.basename(x).split('-')[0] for x in test_files]
+    train_files = [os.path.basename(x).split('-')[0] for x in train_files]
+    val_files = [os.path.basename(x).split('-')[0] for x in val_files]
+    test_files = [os.path.basename(x).split('-')[0] for x in test_files]
 
-        return train_dataloader, val_dataloader, test_dataloader, train_ns, [train_files, val_files, test_files]
+    return train_dataloader, val_dataloader, test_dataloader, train_ns, [train_files, val_files, test_files]

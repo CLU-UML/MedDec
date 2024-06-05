@@ -18,9 +18,6 @@ class MyModel(nn.Module):
                 nn.Linear(hidden_dim, args.num_labels)
                 )
 
-        if args.distil_att:
-            self.distil_att = nn.Parameter(torch.ones(self.backbone.config.hidden_size))
-
     def forward(self, x, mask):
         x = x.to(self.backbone.device)
         mask = mask.to(self.backbone.device)
@@ -178,17 +175,6 @@ def load_model(args, device):
         model = MyModel(args, AutoModel.from_pretrained(args.model_name)).to(device)
     if args.ckpt:
         model.load_state_dict(torch.load(args.ckpt, map_location=device), strict=False)
-    if args.distil:
-        args2 = copy.deepcopy(args)
-        args2.task = 'token'
-        # args2.num_labels = args.num_decs
-        args2.num_labels = args.num_umls_tags
-        model_B = MyModel(args2, AutoModel.from_pretrained(args.model_name)).to(device)
-        model_B.load_state_dict(torch.load(args.distil_ckpt, map_location=device), strict=False)
-        for p in model_B.parameters():
-            p.requires_grad = False
-    else:
-        model_B = None
     if args.label_encoding == 'multiclass':
         if args.use_crf:
             crit = CRF(args.num_labels, batch_first = True).to(device)
@@ -203,4 +189,4 @@ def load_model(args, device):
     lr_scheduler = get_linear_schedule_with_warmup(optimizer,
             int(0.1*args.total_steps), args.total_steps)
 
-    return model, crit, optimizer, lr_scheduler, model_B
+    return model, crit, optimizer, lr_scheduler
