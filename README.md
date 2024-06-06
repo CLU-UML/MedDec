@@ -1,6 +1,6 @@
-# MedDec: A Dataset for Extracting Medical Decisions from Clinical Narratives
+# MedDec: A Dataset for Extracting Medical Decisions from Discharge Summaries
 
-This is the code and dataset described in the [MedDec paper](/) (Findings of ACL: ACL 2024).
+This is the code and dataset described in [MedDec (Elgaar et al., Findings of ACL: ACL 2024)](/).
 
 # Dataset
 
