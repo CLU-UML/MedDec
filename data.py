@@ -26,6 +26,13 @@ rev_pheno_map = {v: k for k,v in pheno_map.items()}
 valid_cats = range(0,9)
 
 def gen_splits(args, phenos):
+    if args.unseen_pheno is None:
+        train_files = open('/data/mohamed/data/mimic_decisions/splits/decisions/train.txt').read().splitlines()
+        val_files = open('/data/mohamed/data/mimic_decisions/splits/decisions/val.txt').read().splitlines()
+        test_files = open('/data/mohamed/data/mimic_decisions/splits/decisions/test.txt').read().splitlines()
+        return train_files, val_files, test_files
+
+
     np.random.seed(0)
     if args.task == 'token':
         files = glob(os.path.join(args.data_dir, 'data/**/*'))
@@ -40,14 +47,13 @@ def gen_splits(args, phenos):
 
     n = len(subjects)
     train_count = int(0.8*n)
-    # train_count = n
     val_count = max(0, int(0.9*n) - train_count)
     test_count = n - train_count - val_count
 
     train, val, test = [], [], []
     np.random.shuffle(subjects)
     subjects = list(subjects)
-    pheno_list = np.unique(list(pheno_map.keys())).tolist()
+    pheno_list = set(np.unique(list(pheno_map.keys())).tolist())
     # pheno_list = set(pheno_map.keys())
     if args.unseen_pheno is not None:
         test_phenos = {rev_pheno_map[args.unseen_pheno]}
@@ -235,6 +241,8 @@ class MyDataset(Dataset):
             labels = np.full(len(encoding['input_ids']), args.num_labels-1, dtype=int)
         else:
             labels = np.zeros((len(encoding['input_ids']), args.num_labels))
+        if not self.train:
+            token_mask = np.ones(len(encoding['input_ids']))
         all_spans = []
         for annot in annots:
             start = int(annot['start_offset'])
@@ -266,6 +274,8 @@ class MyDataset(Dataset):
             if cat:
                 cat -= 1
             if cat is None or cat not in valid_cats:
+                if annot['category'] == 'TBD' and not self.train:
+                    token_mask[enc_start:enc_end] = 0
                 continue
 
             if args.label_encoding == 'multiclass':
@@ -276,7 +286,7 @@ class MyDataset(Dataset):
                     if enc_end > enc_start + 1:
                         labels[enc_start+1:enc_end] = cat2
                 if not self.train:
-                    all_spans.append({'token_start': enc_start, 'token_end': enc_end, 'label': cat, 'text_start': start, 'text_end': end})
+                    all_spans.append({'token_start': enc_start, 'token_end': enc_end-1, 'label': cat, 'text_start': start, 'text_end': end})
             elif args.label_encoding == 'bo':
                 cat1 = cat * 2
                 cat2 = cat * 2 + 1
@@ -293,7 +303,7 @@ class MyDataset(Dataset):
                 labels[enc_start:enc_end, cat] = 1
 
         sid, hadm, rid = map(int, basename.split('_')[:3])
-        row = meddec_stats.loc[sid, hadm, rid]
+        row = self.meddec_stats.loc[sid, hadm, rid]
 
         self.stats['gender'].append(row.GENDER)
         self.stats['ethnicity'].append(row.ETHNICITY)
@@ -307,6 +317,7 @@ class MyDataset(Dataset):
         if not self.train:
             results['all_spans'] = all_spans,
             results['file_name'] = fn
+            results['token_mask'] = token_mask
         return results
 
     def __getitem__(self, idx):
@@ -460,24 +471,6 @@ def load_data(args):
     train_dataset = MyDataset(args, tokenizer, train_files, phenos, train=True)
     val_dataset = MyDataset(args, tokenizer, val_files, phenos)
     test_dataset = MyDataset(args, tokenizer, test_files, phenos)
-    # test_dataset = MyDataset(args, tokenizer, train_files, phenos)
-
-    # import json
-    # d = json.load(open('token_losses.json'))
-    # j = 0
-    # for i in range(len(test_dataset)):
-    #     tokens = tokenizer.convert_ids_to_tokens(test_dataset[i]['input_ids'])
-    #     spans = test_dataset[i]['all_spans'][0]
-    #     fn = test_dataset[i]['file_name']
-    #     for span in spans:
-    #         start = span['token_start']
-    #         end = span['token_end']
-    #         d[j]['tokens'] = tokens[start:end]
-    #         d[j]['file_name'] = fn
-    #         d[j]['span'] = span
-    #         j += 1
-    # json.dump(d, open('token_losses.json', 'w'))
-    # exit()
 
     if args.resample == 'down':
         downsample(train_dataset)

@@ -4,8 +4,8 @@ from datetime import datetime
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', default='/data/mohamed/data/mimic_decisions/phenos500')
-    parser.add_argument('--pheno_path', default='/data/mohamed/data/mimic_decisions')
+    parser.add_argument('--data_dir', default='/data/mohamed/data/mimic_decisions')
+    parser.add_argument('--pheno_path', default='/data/mohamed/data/mimic_decisions/phenos500')
     parser.add_argument('--aim_repo', default='/data/mohamed/')
     parser.add_argument('--ckpt')
     parser.add_argument('--aim_exp', default='mimic-decisions-1215')
