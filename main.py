@@ -11,8 +11,6 @@ from tqdm import tqdm
 from data import load_data
 from model import load_model
 from options import get_args
-from diff_score import load_diff
-diff = load_diff()
 
 mean = lambda l: sum(l)/len(l) if len(l) > 0 else .0
 
@@ -98,19 +96,6 @@ def id_to_label(labels):
         new_labels.append(new_l)
     return new_labels
 
-def get_diff(diff_type, fn, s, e):
-    d = None
-    c = 0
-    while d is None and c < 100:
-        try:
-            d = diff.loc[fn, s, e][diff_type].item()
-        except:
-            e += 1
-            c += 1
-    if d is None:
-        d = -1
-    return d
-
 def f1_score(ys, preds):
     tp = len(preds & ys)
     fn = len(ys) - tp
@@ -123,14 +108,6 @@ def recall_score(ys, preds):
     fn = len(ys) - tp
     recall = tp / (tp + fn)
     return recall
-
-def get_diff_preds(all_preds, sub_ys):
-    new_preds = []
-    for pred in all_preds:
-        _, _, pred_s, pred_e = pred
-        if any([y_s <= pred_s <= y_e or y_s <= pred_e <= y_e for _, _, y_s, y_e in sub_ys]):
-            new_preds.append(pred)
-    return set(new_preds)
 
 def calc_metrics_spans(ys, preds, span_ys = None):
     all_preds = []
@@ -155,19 +132,6 @@ def calc_metrics_spans(ys, preds, span_ys = None):
         sub_ys = {x for x in all_ys if x[1] == c}
         sub_preds = {x for x in all_preds if x[1] == c}
         perclass[c] = f1_score(sub_ys, sub_preds)
-
-    # ds = [get_diff('diff_umls', fn_map[i], t2cs[i][0](s).start, t2cs[i][0](e).end) for (i, _, s, e) in all_ys]
-    # for dc in range(3):
-    #     sub_ys = {y for (y, d) in zip(all_ys, ds) if d == dc}
-    #     sub_preds = get_diff_preds(all_preds, sub_ys)
-    #     print('Recall', recall_score(sub_ys, all_preds), dc)
-    #     print('F1', f1_score(sub_ys, sub_preds), dc)
-    # ds = [get_diff('diff_len', fn_map[i], s, e) for (i, _, s, e) in all_ys]
-    # for dc in range(3):
-    #     sub_ys = {y for (y, d) in zip(all_ys, ds) if d == dc}
-    #     sub_preds = get_diff_preds(all_preds, sub_ys)
-    #     print('Recall', recall_score(sub_ys, all_preds), dc)
-    #     print('F1', f1_score(sub_ys, sub_preds), dc)
 
     return f1, all_preds, all_ys, perclass
 
