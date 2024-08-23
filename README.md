@@ -4,12 +4,14 @@
 
 This is the code and dataset described in **[MedDec (Elgaar et al., Findings of ACL: ACL 2024)](https://aclanthology.org/2024.findings-acl.975/)**.
 
-MedDec is the first dataset specifically developed for extracting and classifying medical decisions from clinical notes. It includes 451 annotated discharge summaries from the MIMIC-III dataset, offering a valuable resource for researchers focused on BioNLP and clinical decision-making.
+MedDec is the first dataset specifically developed for extracting and classifying medical decisions from clinical notes. It includes 451 expert-annotated annotated discharge summaries from the MIMIC-III dataset, offering a valuable resource for understanding and facilitating clinical decision-making.
 
 # Dataset
 
-The dataset is made available through this link: **[https://physionet.org/TBD](https://physionet.org/)**.  
-— <span style="color:red">Currently under review on PhysioNet. Please check back on September 15, 2024</span> —
+> [!NOTE]
+> Currently under review on PhysioNet. Please check back on September 15, 2024.
+
+The dataset is made available through this link: **[https://physionet.org/TBD](https://physionet.org/)**.
 
 The user must sign a data usage agreement before accessing the dataset.
 
