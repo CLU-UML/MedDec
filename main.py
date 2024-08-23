@@ -1,21 +1,16 @@
-from tqdm import tqdm
-
 import os
-import json
-from glob import glob
-import pandas as pd
-import numpy as np
-import torch
-import torch.nn.functional as F
-from data import load_data, load_tokenizer
-from model import load_model
-from torch import nn
-from sklearn import metrics
-from transformers import AutoConfig
-import warnings
 import aim
-from options import get_args
+import json
+import torch
+import warnings
+import numpy as np
+import pandas as pd
 warnings.filterwarnings("ignore")
+
+from tqdm import tqdm
+from data import load_data
+from model import load_model
+from options import get_args
 from diff_score import load_diff
 diff = load_diff()
 
@@ -27,7 +22,7 @@ device = 'cuda:%s'%args.gpu
 all_losses = {'train': [], 'val': [], 'test': []}
 
 
-def indicators_to_spans(labels, t2c = None, idx = None):
+def indicators_to_spans(labels, idx = None):
     def add_span(idx, c, start, end):
         span = (idx, c, start, end)
         spans.add(span)
@@ -37,7 +32,7 @@ def indicators_to_spans(labels, t2c = None, idx = None):
         num_tokens = len(labels)
         num_classes = args.num_labels // 2
         start = None
-        cat = None
+        cat = -1
         for t in range(num_tokens):
             prev_tag = labels[t-1] if t > 0 else args.num_labels -1
             cur_tag = labels[t]
@@ -91,18 +86,6 @@ def indicators_to_spans(labels, t2c = None, idx = None):
     return spans
 
 
-def calc_metrics(y, scores):
-    if args.label_encoding == 'multiclass':
-        preds = scores.argmax(-1)
-    else:
-        preds = torch.where(scores > 0, 1, 0)
-    recall = metrics.recall_score(y, preds, average=None)
-    prec = metrics.precision_score(y, preds, average=None)
-    f1 = metrics.f1_score(y, preds, average=None)
-    # ap = metrics.average_precision_score(y, scores, average=None)
-    ap = np.zeros_like(f1)
-    return f1.mean(), prec.mean(), recall.mean(), ap.mean(), f1, ap
-
 def id_to_label(labels):
     new_labels = []
     for l in labels:
@@ -149,16 +132,15 @@ def get_diff_preds(all_preds, sub_ys):
             new_preds.append(pred)
     return set(new_preds)
 
-def calc_metrics_spans(ys, preds, t2cs, fn_map = None, span_ys = None):
+def calc_metrics_spans(ys, preds, span_ys = None):
     all_preds = []
     all_ys = []
-    for i, (y, pred, t2c) in enumerate(zip(ys, preds, t2cs)):
-        t2c = t2c[0]
-        pred_spans = indicators_to_spans(pred, t2c = t2c, idx = i)
+    for i, (y, pred) in enumerate(zip(ys, preds)):
+        pred_spans = indicators_to_spans(pred, idx = i)
         all_preds.append(pred_spans)
         if span_ys is None:
             y = y.squeeze()
-            y_spans = indicators_to_spans(y, t2c = t2c, idx = i)
+            y_spans = indicators_to_spans(y, idx = i)
             all_ys.append(y_spans)
 
     all_preds = set().union(*all_preds)
@@ -174,13 +156,13 @@ def calc_metrics_spans(ys, preds, t2cs, fn_map = None, span_ys = None):
         sub_preds = {x for x in all_preds if x[1] == c}
         perclass[c] = f1_score(sub_ys, sub_preds)
 
-    # ds = [get_diff('diff_umls', fn_map[i], s, e) for (i, c, s, e) in all_ys]
+    # ds = [get_diff('diff_umls', fn_map[i], t2cs[i][0](s).start, t2cs[i][0](e).end) for (i, _, s, e) in all_ys]
     # for dc in range(3):
     #     sub_ys = {y for (y, d) in zip(all_ys, ds) if d == dc}
     #     sub_preds = get_diff_preds(all_preds, sub_ys)
     #     print('Recall', recall_score(sub_ys, all_preds), dc)
     #     print('F1', f1_score(sub_ys, sub_preds), dc)
-    # ds = [get_diff('diff_len', fn_map[i], s, e) for (i, c, s, e) in all_ys]
+    # ds = [get_diff('diff_len', fn_map[i], s, e) for (i, _, s, e) in all_ys]
     # for dc in range(3):
     #     sub_ys = {y for (y, d) in zip(all_ys, ds) if d == dc}
     #     sub_preds = get_diff_preds(all_preds, sub_ys)
@@ -197,18 +179,15 @@ def save_losses(model, crit, train_dataloader, val_dataloader, test_dataloader):
     test_losses = evaluate(model, test_dataloader, crit, return_losses = True)
     all_losses['test'].append(test_losses)
 
-def evaluate(model, dataloader, crit, return_losses = False, return_preds = False, fn_map = None):
+def evaluate(model, dataloader, crit, return_losses = False, return_preds = False):
     model.eval()
     outs, ys = [], []
-    outs2 = []
-    t2cs = []
     lens = []
     token_masks = []
     for batch in tqdm(dataloader, desc='Evaluation'):
         x = batch['input_ids']
         y = batch['labels']
         mask = batch['mask']
-        t2c = batch['t2c']
         if args.task == 'seq':
             ids = batch['ids']
 
@@ -218,7 +197,6 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
         outs.append(logits)
         lens.extend([x.shape[0] for x in logits])
         ys.append(y)
-        t2cs.append(t2c)
 
         if 'token_mask' in batch:
             token_masks.append(batch['token_mask'])
@@ -257,13 +235,11 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
 
     loss = loss.mean()
 
-    scores = torch.cat(outs, 1).cpu().squeeze()
     y = torch.cat(ys, 1).squeeze()
 
     if len(token_masks) > 0:
         token_masks = torch.cat(token_masks, 1).squeeze().to(device)
         acc = ((ys_stack == preds_stack).float() * token_masks).sum() / token_masks.sum() * 100
-        acc2 = (ys_stack == preds_stack).float().mean() * 100
     else:
         acc = (ys_stack == preds_stack).float().mean() * 100
 
@@ -272,13 +248,12 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
         span_ys = [(i, s['label'], s['token_start'], s['token_end']) for i, spans in enumerate(all_spans) for s in spans[0]]
     else:
         span_ys = None
-    f1, span_preds, span_ys, perclass = calc_metrics_spans(ys, preds, t2cs, fn_map, span_ys)
+    f1, span_preds, span_ys, perclass = calc_metrics_spans(ys, preds, span_ys)
     if return_preds:
         return span_preds, span_ys
     metrics_out = {}
     metrics_out['f1'] = f1
     metrics_out['acc'] = acc
-    # metrics_out = calc_metrics(y, scores)
     model.train()
 
     # genders = dataloader.dataset.stats['gender']
@@ -305,19 +280,12 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
     #     sub_acc = (sub_ys == sub_preds).float().mean() * 100
     #     print(l, sub_acc)
 
-    if False and args.task == 'token':
+    if args.task == 'token':
         pheno_results = {}
         for pheno, ids in dataloader.dataset.pheno_ids.items():
             sub_ys = [x for i,x in enumerate(ys) if i in ids]
             sub_preds = [x for i,x in enumerate(preds) if i in ids]
-            sub_t2cs = [x for i,x in enumerate(t2cs) if i in ids]
-            f1, span_preds, span_ys, _ = calc_metrics_spans(sub_ys, sub_preds, sub_t2cs, fn_map)
-            # subscores = torch.cat([x for i,x in enumerate(outs) if i in ids], 1).squeeze()
-            # suby = torch.cat([x for i,x in enumerate(ys) if i in ids], 1).squeeze()
-            # suby_sum = suby.sum(0)
-            # suby = suby[:,suby_sum != 0]
-            # subscores = subscores[:,suby_sum != 0]
-            # submetrics = calc_metrics(suby, subscores)
+            f1, span_preds, span_ys, _ = calc_metrics_spans(sub_ys, sub_preds)
             pheno_results[pheno] = f1
     else:
         pheno_results = None
@@ -331,9 +299,6 @@ def process(sample, model, tokenizer, out_dir):
         encoding = tokenizer.encode_plus(sample['TEXT'])
         x = torch.tensor(encoding['input_ids']).unsqueeze(0).to(device)
         mask = torch.tensor(encoding['attention_mask']).unsqueeze(0).to(device)
-        t2c = encoding.token_to_chars
-        if args.task == 'seq':
-            ids = batch['ids']
 
         with torch.no_grad():
             out = model.generate(x, mask)
@@ -343,7 +308,7 @@ def process(sample, model, tokenizer, out_dir):
         else:
             pred = torch.where(out > 0, 1, 0)
         pred = pred.squeeze()
-        spans = indicators_to_spans(pred, t2c = t2c)
+        spans = indicators_to_spans(pred)
         all_spans = []
         for _, cat, start, end in spans:
             span_dict = {}
@@ -359,7 +324,6 @@ def predict_mimic(model, data, tokenizer):
 
     model.eval()
     outs = []
-    t2cs = []
     out_dir = './all_mimic_decisions/'
     kwargs = {'model': model, 'tokenizer': tokenizer, 'out_dir': out_dir}
     import multiprocessing as mp
@@ -382,7 +346,6 @@ def train(args, model, crit, optimizer, lr_scheduler,
 
     step = 0
     best_f1 = -1
-    best_ap = -1
     best_acc = 0
     best_step = 0
     best_pheno = None
@@ -397,29 +360,13 @@ def train(args, model, crit, optimizer, lr_scheduler,
         x = batch['input_ids']
         y = batch['labels']
         mask = batch['mask']
-        ids = batch['ids']
 
         y = y.to(device)
         if args.task == 'seq':
             out, _ = model.phenos(x, mask)
             logits = out[1]
-            att = out[0].attentions[-1]
         elif args.task == 'token':
             out, logits = model.decisions(x, mask)
-
-        # bs, num_heads, k, q = att.shape
-        # scores = [[] for _ in range(args.num_decs+1)]
-        # for i in range(bs):
-        #     for j in range(num_heads):
-        #         att_slice = att[i,j]
-        #         for k in range(args.num_decs+1):
-        #             subids = ids[i][k]
-        #             subatt = att_slice[:,subids]
-        #             if subatt.numel() > 0:
-        #                 scores[k].extend(subatt.view(-1).tolist())
-        # for i, score in enumerate(scores):
-        #     dec = 'none' if i == (len(scores)-1) else str(i)
-        #     writer.track(mean(score), name='attention', context={'decision': dec})
 
         if args.label_encoding == 'multiclass':
             if args.use_crf:
@@ -461,7 +408,6 @@ def train(args, model, crit, optimizer, lr_scheduler,
                 writer.track(f1, name='f1', step = step)
                 # writer.track(prec, name='precision', step = step)
                 # writer.track(rec, name='recall', step = step)
-                # writer.track(ap, name='ap', step = step)
             if f1 > best_f1:
                 best_f1 = f1
                 best_acc = acc
@@ -473,17 +419,14 @@ def train(args, model, crit, optimizer, lr_scheduler,
         step += 1
     if writer is not None:
         writer.track(best_f1, name = 'best_f1')
-        # writer.track(best_ap, name = 'best_ap')
         writer.track(best_step, name = 'best_step')
         if best_pheno is not None:
             for pheno, f1 in best_pheno.items():
                 writer.track(f1, name='best_f1', context={'group': pheno})
-                # writer.track(ap, name='best_ap', context={'group': pheno})
-        # if args.task == 'token':
-        #     f1s, aps = best_perclass
-        #     for i in range(len(f1s)):
-        #         writer.track(f1s[i], name='best_f1', context={'decision': i})
-        #         # writer.track(aps[i], name='best_ap', context={'decision': i})
+        if args.task == 'token':
+            f1s = best_perclass
+            for i in range(len(f1s)):
+                writer.track(f1s[i], name='best_f1', context={'decision': i})
     return best_f1, best_acc, best_step
 
 def main(args):
@@ -492,7 +435,7 @@ def main(args):
         torch.manual_seed(seed)
         np.random.seed(seed)
         args.seed = seed
-        train_dataloader, val_dataloader, test_dataloader, train_ns, files = load_data(args)
+        train_dataloader, val_dataloader, test_dataloader, train_ns = load_data(args)
         model, crit, optimizer, lr_scheduler = load_model(args, device)
 
         if not args.eval_only:
@@ -502,9 +445,7 @@ def main(args):
             f1s.append(f1)
             print('seed: %d, F1: %.1f, Acc: %.1f'%(seed, f1, acc))
             # Test
-            test_files = files[2]
-            fn_map = {i: fn for i, fn in enumerate(test_files)}
-            metrics_out, pheno_results, loss, perclass = evaluate(model, test_dataloader, crit, fn_map=fn_map)
+            metrics_out, pheno_results, loss, perclass = evaluate(model, test_dataloader, crit)
             f1, acc = metrics_out['f1'], metrics_out['acc']
             print('[Test] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
                     .format(f1, acc, loss))
@@ -525,19 +466,12 @@ def main(args):
             #         .format(f1, acc, loss))
 
             # Test
-            test_files = files[2]
-            fn_map = {i: fn for i, fn in enumerate(test_files)}
-            metrics_out, pheno_results, loss, perclass = evaluate(model, test_dataloader, crit, fn_map=fn_map)
+            metrics_out, pheno_results, loss, perclass = evaluate(model, test_dataloader, crit)
             f1, acc = metrics_out['f1'], metrics_out['acc']
             print('[Test] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
                     .format(f1, acc, loss))
             # print(pheno_results)
             print(perclass)
-
-            # print latex row [acc, f1, *perclass]
-            # s = ' & '.join(['%.1f'%x for x in [acc, f1, *perclass.values()]])
-            # s += ' \\\\'
-            # print(s)
 
             # predict_mimic(model, data, tokenizer)
         if args.save_losses:

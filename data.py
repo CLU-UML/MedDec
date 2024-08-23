@@ -490,8 +490,4 @@ def load_data(args):
     val_dataloader = DataLoader(val_dataset, 1, False, collate_fn=collate_full)
     test_dataloader = DataLoader(test_dataset, 1, False, collate_fn=collate_full)
 
-    train_files = [os.path.basename(x).split('-')[0] for x in train_files]
-    val_files = [os.path.basename(x).split('-')[0] for x in val_files]
-    test_files = [os.path.basename(x).split('-')[0] for x in test_files]
-
-    return train_dataloader, val_dataloader, test_dataloader, train_ns, [train_files, val_files, test_files]
+    return train_dataloader, val_dataloader, test_dataloader, train_ns
