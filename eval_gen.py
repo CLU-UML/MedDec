@@ -3,23 +3,28 @@ import os
 from os import path
 
 # Non-exact span-match (plus-minus 50 chars)
-def get_tp(ys, preds):
+def get_tp(ys, preds, method='em'):
     c = 0
     for pred in all_preds:
         pred_sample, pred_cat, pred_dec = pred
         for sample, cat, dec in all_labels:
-            # if dec == pred_dec \
-            if (dec in pred_dec or pred_dec in dec) \
-                    and pred_cat == cat \
-                    and pred_sample == sample \
-                    and abs(len(pred_dec) - len(dec)) <= 50:
-                c+= 1
+            if method == 'em':
+                if dec == pred_dec \
+                        and pred_cat == cat \
+                        and pred_sample == sample:
+                    c+= 1
+            elif method == 'approx-m':
+                if (dec in pred_dec or pred_dec in dec) \
+                        and pred_cat == cat \
+                        and pred_sample == sample \
+                        and abs(len(pred_dec.split()) - len(dec.split())) <= 10:
+                    c+= 1
     return c
 
 
-def f1_score(ys, preds):
+def f1_score(ys, preds, method='em'):
     # tp = len(preds & ys)
-    tp = get_tp(ys, preds)
+    tp = get_tp(ys, preds, method)
     fn = len(ys) - tp
     fp = len(preds) - tp
     f1 = (2 * tp / (2 * tp + fp + fn)) * 100 if tp + fp + fn > 0 else 0
@@ -48,7 +53,9 @@ for sample in os.listdir('gens/one'):
         preds = process_preds(preds, int(sample), cat)
         all_preds |= preds
 
-print(f1_score(all_labels, all_preds))
+# method = 'approx-m'
+method = 'em'
+print(f1_score(all_labels, all_preds, method))
 
 all_labels = set()
 all_preds = set()
@@ -60,4 +67,4 @@ for sample in os.listdir('gens/zero'):
         preds = process_preds(preds, int(sample), cat)
         all_preds |= preds
 
-print(f1_score(all_labels, all_preds))
+print(f1_score(all_labels, all_preds, method))

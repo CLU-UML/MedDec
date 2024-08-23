@@ -10,7 +10,6 @@ import torch.nn.functional as F
 from data import load_data, load_tokenizer
 from model import load_model
 from torch import nn
-from demo import run_gradio
 from sklearn import metrics
 from transformers import AutoConfig
 import warnings
@@ -30,11 +29,6 @@ all_losses = {'train': [], 'val': [], 'test': []}
 
 def indicators_to_spans(labels, t2c = None, idx = None):
     def add_span(idx, c, start, end):
-        if t2c(start) is None or t2c(end) is None:
-            start, end = -1, -1
-        else:
-            start = t2c(start).start
-            end = t2c(end).end
         span = (idx, c, start, end)
         spans.add(span)
 
@@ -43,17 +37,22 @@ def indicators_to_spans(labels, t2c = None, idx = None):
         num_tokens = len(labels)
         num_classes = args.num_labels // 2
         start = None
-        cls = None
+        cat = None
         for t in range(num_tokens):
-            if start and labels[t] == cls + 1:
+            prev_tag = labels[t-1] if t > 0 else args.num_labels -1
+            cur_tag = labels[t]
+
+            if start is not None and cur_tag == cat + 1:
                 continue
-            elif start:
-                add_span(idx, cls // 2, start, t - 1)
+            elif start is not None:
+                add_span(idx, cat // 2, start, t - 1)
                 start = None
-            # if not start and labels[t] in [2*x for x in range(num_classes)]:
-            if not start and labels[t] != (args.num_labels - 1):
+
+            if start is None and (cur_tag in [2*x for x in range(num_classes)]
+                              or (prev_tag == (args.num_labels - 1)
+                                  and cur_tag != (args.num_labels - 1))):
                 start = t
-                cls = int(labels[t]) // 2 * 2
+                cat = int(cur_tag) // 2 * 2
     else:
         num_tokens, num_classes = labels.shape
         if args.label_encoding == 'bo':
@@ -150,24 +149,23 @@ def get_diff_preds(all_preds, sub_ys):
             new_preds.append(pred)
     return set(new_preds)
 
-def calc_metrics_spans(ys, preds, t2cs, fn_map = None):
-
-    # ys_labels = [id_to_label(l.squeeze()) for l in ys]
-    # outs_labels = [id_to_label(l.argmax(-1).squeeze()) for l in outs]
-    # results = seqeval.compute(predictions=outs_labels, references=ys_labels)
-    # print(f'[Seqeval] F1: {results["overall_f1"]}')
-
+def calc_metrics_spans(ys, preds, t2cs, fn_map = None, span_ys = None):
     all_preds = []
     all_ys = []
     for i, (y, pred, t2c) in enumerate(zip(ys, preds, t2cs)):
-        y = y.squeeze()
         t2c = t2c[0]
         pred_spans = indicators_to_spans(pred, t2c = t2c, idx = i)
-        y_spans = indicators_to_spans(y, t2c = t2c, idx = i)
         all_preds.append(pred_spans)
-        all_ys.append(y_spans)
+        if span_ys is None:
+            y = y.squeeze()
+            y_spans = indicators_to_spans(y, t2c = t2c, idx = i)
+            all_ys.append(y_spans)
+
     all_preds = set().union(*all_preds)
-    all_ys = set().union(*all_ys)
+    if span_ys is None:
+        all_ys = set().union(*all_ys)
+    else:
+        all_ys = set(span_ys)
     f1 = f1_score(all_ys, all_preds)
 
     perclass = {}
@@ -205,7 +203,7 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
     outs2 = []
     t2cs = []
     lens = []
-    results = []
+    token_masks = []
     for batch in tqdm(dataloader, desc='Evaluation'):
         x = batch['input_ids']
         y = batch['labels']
@@ -222,24 +220,9 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
         ys.append(y)
         t2cs.append(t2c)
 
-        for span in batch['all_spans'][0][0]:
-            start = span['token_start']
-            end = span['token_end']
-            cat = span['label']
-            cat1 = cat * 2
-            cat2 = cat * 2 + 1
-            label_arr = [cat1] + [cat2] * (end - start - 1)
-            label_arr = torch.tensor(label_arr).to(device)
-            token_losses = crit(logits[0][start:end], label_arr).cpu().tolist()
-            results.append({
-                'losses': token_losses,
-                'preds': logits[0].argmax(-1).cpu().tolist()[start:end],
-                'logits': logits[0].cpu().tolist()[start:end],
-                'labels': y[0].tolist()[start:end],
-                })
-    import json
-    json.dump(results, open('token_losses.json', 'w'))
-    exit()
+        if 'token_mask' in batch:
+            token_masks.append(batch['token_mask'])
+
     if args.label_encoding == 'multiclass':
         outs_stack = torch.cat([x.view(-1, args.num_labels) for x in outs], 0)
         ys_stack = torch.cat([x.view(-1) for x in ys], 0).to(device)
@@ -277,16 +260,19 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
     scores = torch.cat(outs, 1).cpu().squeeze()
     y = torch.cat(ys, 1).squeeze()
 
-    acc = (ys_stack == preds_stack).float().mean() * 100
+    if len(token_masks) > 0:
+        token_masks = torch.cat(token_masks, 1).squeeze().to(device)
+        acc = ((ys_stack == preds_stack).float() * token_masks).sum() / token_masks.sum() * 100
+        acc2 = (ys_stack == preds_stack).float().mean() * 100
+    else:
+        acc = (ys_stack == preds_stack).float().mean() * 100
 
-    # acc_list = []
-    # for c in range(19):
-    #     ids = ys_stack == c
-    #     sub_acc = (ys_stack[ids] == preds_stack[ids]).float().mean() * 100
-    #     acc_list.append(sub_acc.item())
-    # print(acc_list, np.mean(acc_list))
-
-    f1, span_preds, span_ys, perclass = calc_metrics_spans(ys, preds, t2cs, fn_map)
+    if 'all_spans' in dataloader.dataset.data[0]:
+        all_spans = [x['all_spans'] for x in dataloader.dataset.data]
+        span_ys = [(i, s['label'], s['token_start'], s['token_end']) for i, spans in enumerate(all_spans) for s in spans[0]]
+    else:
+        span_ys = None
+    f1, span_preds, span_ys, perclass = calc_metrics_spans(ys, preds, t2cs, fn_map, span_ys)
     if return_preds:
         return span_preds, span_ys
     metrics_out = {}
@@ -295,29 +281,29 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
     # metrics_out = calc_metrics(y, scores)
     model.train()
 
-    genders = dataloader.dataset.stats['gender']
-    for g in set(genders):
-        ids = [i for i,x in enumerate(genders) if x==g]
-        sub_ys = torch.cat([x for i,x in enumerate(ys) if i in ids], 1).squeeze().cpu()
-        sub_preds = torch.cat([x for i,x in enumerate(preds) if i in ids]).cpu()
-        sub_acc = (sub_ys == sub_preds).float().mean() * 100
-        print(g, sub_acc)
+    # genders = dataloader.dataset.stats['gender']
+    # for g in set(genders):
+    #     ids = [i for i,x in enumerate(genders) if x==g]
+    #     sub_ys = torch.cat([x for i,x in enumerate(ys) if i in ids], 1).squeeze().cpu()
+    #     sub_preds = torch.cat([x for i,x in enumerate(preds) if i in ids]).cpu()
+    #     sub_acc = (sub_ys == sub_preds).float().mean() * 100
+    #     print(g, sub_acc)
 
-    ethnicities = dataloader.dataset.stats['ethnicity']
-    for e in set(ethnicities):
-        ids = [i for i,x in enumerate(ethnicities) if x==e]
-        sub_ys = torch.cat([x for i,x in enumerate(ys) if i in ids], 1).squeeze().cpu()
-        sub_preds = torch.cat([x for i,x in enumerate(preds) if i in ids]).cpu()
-        sub_acc = (sub_ys == sub_preds).float().mean() * 100
-        print(e, sub_acc)
+    # ethnicities = dataloader.dataset.stats['ethnicity']
+    # for e in set(ethnicities):
+    #     ids = [i for i,x in enumerate(ethnicities) if x==e]
+    #     sub_ys = torch.cat([x for i,x in enumerate(ys) if i in ids], 1).squeeze().cpu()
+    #     sub_preds = torch.cat([x for i,x in enumerate(preds) if i in ids]).cpu()
+    #     sub_acc = (sub_ys == sub_preds).float().mean() * 100
+    #     print(e, sub_acc)
 
-    langs = dataloader.dataset.stats['language']
-    for l in set(langs):
-        ids = [i for i,x in enumerate(langs) if x==l]
-        sub_ys = torch.cat([x for i,x in enumerate(ys) if i in ids], 1).squeeze().cpu()
-        sub_preds = torch.cat([x for i,x in enumerate(preds) if i in ids]).cpu()
-        sub_acc = (sub_ys == sub_preds).float().mean() * 100
-        print(l, sub_acc)
+    # langs = dataloader.dataset.stats['language']
+    # for l in set(langs):
+    #     ids = [i for i,x in enumerate(langs) if x==l]
+    #     sub_ys = torch.cat([x for i,x in enumerate(ys) if i in ids], 1).squeeze().cpu()
+    #     sub_preds = torch.cat([x for i,x in enumerate(preds) if i in ids]).cpu()
+    #     sub_acc = (sub_ys == sub_preds).float().mean() * 100
+    #     print(l, sub_acc)
 
     if False and args.task == 'token':
         pheno_results = {}
@@ -465,7 +451,7 @@ def train(args, model, crit, optimizer, lr_scheduler,
         if len(val_dataloader) > 0 and step % (args.val_log*args.grad_accumulation) == 0:
             if args.save_losses:
                 save_losses(model, crit, train_ns, val_dataloader, test_dataloader)
-            metrics_out, pheno_results, loss = evaluate(model, val_dataloader, crit)
+            metrics_out, pheno_results, loss, perclass = evaluate(model, val_dataloader, crit)
             f1, acc = metrics_out['f1'], metrics_out['acc']
             if verbose:
                 print('[step: {:5d}] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
@@ -513,74 +499,50 @@ def main(args):
             f1, acc, step = train(args, model, crit, 
                     optimizer, lr_scheduler, train_dataloader,
                     val_dataloader, args.verbose, train_ns, test_dataloader)
-            # metrics_out, pheno_results, loss = evaluate(model, test_dataloader, crit)
-            # exit()
             f1s.append(f1)
             print('seed: %d, F1: %.1f, Acc: %.1f'%(seed, f1, acc))
             # Test
             test_files = files[2]
             fn_map = {i: fn for i, fn in enumerate(test_files)}
-            metrics_out, pheno_results, loss = evaluate(model, test_dataloader, crit, fn_map=fn_map)
+            metrics_out, pheno_results, loss, perclass = evaluate(model, test_dataloader, crit, fn_map=fn_map)
             f1, acc = metrics_out['f1'], metrics_out['acc']
             print('[Test] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
                     .format(f1, acc, loss))
-            print(pheno_results)
+            # print(pheno_results)
+            print(perclass)
         else:
             model.eval()
             # Train
-            metrics_out, pheno_results, loss = evaluate(model, train_ns, crit)
-            f1, acc = metrics_out['f1'], metrics_out['acc']
-            print('[Train] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
-                    .format(f1, acc, loss))
+            # metrics_out, pheno_results, loss = evaluate(model, train_ns, crit)
+            # f1, acc = metrics_out['f1'], metrics_out['acc']
+            # print('[Train] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
+            #         .format(f1, acc, loss))
+
             # Val
-            # metrics_out, pheno_results, loss = evaluate(model, val_dataloader, crit)
+            # metrics_out, pheno_results, loss, perclass = evaluate(model, val_dataloader, crit)
             # f1, acc = metrics_out['f1'], metrics_out['acc']
             # print('[Val] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
             #         .format(f1, acc, loss))
+
             # Test
-            # test_files = files[2]
-            # fn_map = {i: fn for i, fn in enumerate(test_files)}
-            # metrics_out, pheno_results, loss, perclass = evaluate(model, test_dataloader, crit, fn_map=fn_map)
-            # f1, acc = metrics_out['f1'], metrics_out['acc']
-            # print('[Test] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
-            #         .format(f1, acc, loss))
+            test_files = files[2]
+            fn_map = {i: fn for i, fn in enumerate(test_files)}
+            metrics_out, pheno_results, loss, perclass = evaluate(model, test_dataloader, crit, fn_map=fn_map)
+            f1, acc = metrics_out['f1'], metrics_out['acc']
+            print('[Test] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
+                    .format(f1, acc, loss))
             # print(pheno_results)
-            # print(perclass)
+            print(perclass)
+
+            # print latex row [acc, f1, *perclass]
+            # s = ' & '.join(['%.1f'%x for x in [acc, f1, *perclass.values()]])
+            # s += ' \\\\'
+            # print(s)
 
             # predict_mimic(model, data, tokenizer)
         if args.save_losses:
             np.savez('losses_%d.npz'%seed, train=all_losses['train'], val=all_losses['val'], test=all_losses['test'])
     return np.mean(f1s)
 
-def optuna(args):
-    def objective(trial):
-        lr = trial.suggest_float('lr', 1e-6, 1e-3, log=True)
-        pos_weight = trial.suggest_float('pos_weight', 1, 15)
-        batch_size = trial.suggest_int('batch_size', 4, 32, step=4)
-
-        args.lr = lr
-        args.batch_size = batch_size
-        args.pos_weight = pos_weight
-        args.verbose = False
-        args.seed = [0,1,2]
-
-        return main(args)
-    import optuna
-    study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=500)
-
 if __name__ == '__main__':
-    if args.optuna:
-        optuna(args)
-    elif args.gradio:
-        ##
-        # train_dataloader, _, _, _, _ = load_data(args)
-        # dataset = train_dataloader.dataset
-        ##
-        tokenizer = load_tokenizer(args.model_name)
-        model = load_model(args, device)[0]
-        model.eval()
-        torch.set_grad_enabled(False)
-        run_gradio(model, tokenizer)
-    else:
-        main(args)
+    main(args)

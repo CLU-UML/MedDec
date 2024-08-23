@@ -1,5 +1,12 @@
-argparse
-numpy
-pandas
-torch==1.13.1
-transformers==4.38.1
+aim==3.19.3
+datasets==2.19.0
+nltk==3.8.1
+numpy==2.1.0
+pandas==2.2.2
+quickumls==1.4.2
+scikit_learn==1.4.2
+seqeval==1.2.2
+spacy==3.3.0
+torch==2.2.1
+tqdm==4.65.0
+transformers==4.39.3

@@ -174,7 +174,7 @@ def load_model(args, device):
     else:
         model = MyModel(args, AutoModel.from_pretrained(args.model_name)).to(device)
     if args.ckpt:
-        model.load_state_dict(torch.load(args.ckpt, map_location=device), strict=False)
+        model.load_state_dict(torch.load(args.ckpt, map_location=device), strict=True)
     if args.label_encoding == 'multiclass':
         if args.use_crf:
             crit = CRF(args.num_labels, batch_first = True).to(device)

@@ -4,10 +4,10 @@ from datetime import datetime
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', default='./ACTdb102003.csv')
-    parser.add_argument('--pheno_path', default='.')
-    parser.add_argument('--aim_repo', default='.')
+    parser.add_argument('--data_dir', default='./data/')
+    parser.add_argument('--pheno_path', default='./ACTdb102003.csv')
     parser.add_argument('--ckpt')
+    parser.add_argument('--aim_repo', default='.')
     parser.add_argument('--aim_exp', default='mimic-decisions-1215')
     parser.add_argument('--label_encoding', default='multiclass')
     parser.add_argument('--debug', action='store_true')
@@ -36,8 +36,6 @@ def get_args():
     parser.add_argument('--truncate_train', action='store_true')
     parser.add_argument('--truncate_eval', action='store_true')
     parser.add_argument('--load_ckpt', action='store_true')
-    parser.add_argument('--gradio', action='store_true')
-    parser.add_argument('--optuna', action='store_true')
     parser.add_argument('--eval_only', action='store_true')
     parser.add_argument('--lr', type=float, default=4e-5)
     parser.add_argument('--resample', default='')
