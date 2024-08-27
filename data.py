@@ -27,9 +27,10 @@ valid_cats = range(0,9)
 
 def gen_splits(args, phenos):
     if args.unseen_pheno is None:
-        train_files = open('/data/mohamed/data/mimic_decisions/splits/decisions/train.txt').read().splitlines()
-        val_files = open('/data/mohamed/data/mimic_decisions/splits/decisions/val.txt').read().splitlines()
-        test_files = open('/data/mohamed/data/mimic_decisions/splits/decisions/test.txt').read().splitlines()
+        splits_dir = os.path.join(args.data_dir, 'splits')
+        train_files = open(os.path.join(splits_dir, 'train.txt')).read().splitlines()
+        val_files = open(os.path.join(splits_dir, 'val.txt')).read().splitlines()
+        test_files = open(os.path.join(splits_dir, 'test.txt')).read().splitlines()
         return train_files, val_files, test_files
 
 
@@ -150,61 +151,18 @@ class MyDataset(Dataset):
         return np.array([x[col] for x in self.data])
 
     def load_phenos(self, args, row, idx):
-        txt_candidates = glob(os.path.join(args.data_dir,
-            f'raw_text/{row["subject_id"]}_{row["hadm_id"]}*.txt'))
-        text = open(txt_candidates[0]).read()
-        if args.pheno_n == 500:
-
-            file_dir = glob(os.path.join(args.data_dir,
-                f'data/*/{row["subject_id"]}_{row["hadm_id"]}*.json'))[0]
-            with open(file_dir) as f:
-                data = json.load(f, strict=False)
-            annots = data[0]['annotations']
-
-            encoding = self.tokenizer.encode_plus(text,
-                    truncation=args.truncate_train if self.train else args.truncate_eval)
-
-            ids = np.zeros((args.num_decs, len(encoding['input_ids'])))
-            for annot in annots:
-                start = int(annot['start_offset'])
-
-                enc_start = encoding.char_to_token(start)
-                i = 1
-                while enc_start is None:
-                    enc_start = encoding.char_to_token(start+i)
-                    i += 1
-
-                end = int(annot['end_offset'])
-                enc_end = encoding.char_to_token(end)
-                j = 1
-                while enc_end is None:
-                    enc_end = encoding.char_to_token(end-j)
-                    j += 1
-
-                if enc_start is None or enc_end is None:
-                    raise ValueError
-
-                cat = parse_cat(annot['category'])
-                if not cat or cat not in valid_cats:
-                    continue
-                ids[cat-1, enc_start:enc_end] = 1
-        else:
-            encoding = self.tokenizer.encode_plus(text,
-                    truncation=args.truncate_train if self.train else args.truncate_eval)
-            ids = None
+        txt_path = os.path.join(args.data_dir, f'raw_text/{row["subject_id"]}_{row["hadm_id"]}_{row["row_id"]}.txt')
+        text = open(txt_path).read()
+        encoding = self.tokenizer.encode_plus(text,
+                truncation=args.truncate_train if self.train else args.truncate_eval)
+        ids = None
 
         labels = np.zeros(args.num_phenos)
 
-        if args.pheno_n in (500, 800):
-            sample_phenos = row['phenotype_label']
-            if sample_phenos != 'none':
-                for pheno in sample_phenos.split(','):
-                    labels[pheno_map[pheno.lower()]] = 1
-
-        elif args.pheno_n == 1500:
-            for k,v in pheno_map.items():
-                if row[k] == 1:
-                    labels[v] = 1
+        sample_phenos = row['phenotype_label']
+        if sample_phenos != 'none':
+            for pheno in sample_phenos.split(','):
+                labels[pheno_map[pheno.lower()]] = 1
 
         if args.pheno_id is not None:
             if args.pheno_id == -1:
@@ -215,27 +173,26 @@ class MyDataset(Dataset):
         return encoding['input_ids'], labels, ids
 
     def load_decisions(self, args, fn, idx, phenos):
-        basename = os.path.basename(fn).split("-")[0]
+        basename = os.path.splitext(os.path.basename(fn))[0]
         file_dir = os.path.join(args.data_dir, 'data', fn)
 
-        pheno_id = "_".join(basename.split("_")[:3]) + '.txt'
-        txt_candidates = glob(os.path.join(args.data_dir,
-            f'raw_text/{basename}*.txt'))
-        text = open(txt_candidates[0]).read()
+        sid, hadm, rid = map(int, basename.split('_')[:3])
+        txt_path = os.path.join(args.data_dir, f'raw_text/{basename}.txt')
+        text = open(txt_path).read()
         encoding = self.tokenizer.encode_plus(text,
                 max_length=args.max_len,
                 truncation=args.truncate_train if self.train else args.truncate_eval,
                 padding = 'max_length',
                 )
-        if pheno_id in phenos.index:
-            sample_phenos = phenos.loc[pheno_id]['phenotype_label']
+        if (sid, hadm, rid) in phenos.index:
+            sample_phenos = phenos.loc[sid, hadm, rid]['phenotype_label']
             for pheno in sample_phenos.split(','):
                 self.pheno_ids[pheno].append(idx)
 
 
         with open(file_dir) as f:
             data = json.load(f, strict=False)
-        annots = data[0]['annotations']
+        annots = data['annotations']
             
         if args.label_encoding == 'multiclass':
             labels = np.full(len(encoding['input_ids']), args.num_labels-1, dtype=int)
@@ -302,7 +259,6 @@ class MyDataset(Dataset):
             else:
                 labels[enc_start:enc_end, cat] = 1
 
-        sid, hadm, rid = map(int, basename.split('_')[:3])
         row = self.meddec_stats.loc[sid, hadm, rid]
 
         self.stats['gender'].append(row.GENDER)
@@ -336,26 +292,9 @@ def parse_cat(cat):
 
 
 def load_phenos(args):
-    if args.pheno_n == 500:
-        phenos = pd.read_csv(args.pheno_path, sep='\t').rename(lambda x: x.strip(), axis=1)
-        phenos['raw_text'] = phenos['raw_text'].apply(lambda x: os.path.basename(x))
-        phenos[['SUBJECT_ID', 'HADM_ID', 'ROW_ID']] = \
-            [os.path.splitext(x)[0].split('_')[:3] for x in phenos['raw_text']]
-        phenos = phenos[phenos['phenotype_label'] != '?']
-    elif args.pheno_n == 800:
-        phenos = pd.read_csv(args.pheno_path)
-        phenos.rename({'Ham_ID': 'HADM_ID'}, inplace=True, axis=1)
-        phenos = phenos[phenos.phenotype_label != '?']
-    elif args.pheno_n == 1500:
-        phenos = pd.read_csv(args.pheno_path)
-        phenos.rename({'Hospital.Admission.ID': 'HADM_ID',
-            'subject.id': 'SUBJECT_ID'}, inplace=True, axis=1)
-        phenos = phenos[phenos.Unsure != 1]
-        phenos['psychiatric.disorders'] = phenos['Dementia']\
-                                        | phenos['Developmental.Delay.Retardation']\
-                                        | phenos['Schizophrenia.and.other.Psychiatric.Disorders']
-    else:
-        raise NotImplementedError("Please provide the phenotypes file")
+    phenos = pd.read_csv(os.path.join(args.data_dir, 'phenos.csv'))
+    phenos.rename({'Ham_ID': 'HADM_ID'}, inplace=True, axis=1)
+    phenos = phenos[phenos.phenotype_label != '?']
     phenos.rename(lambda k: k.lower(), inplace=True, axis = 1)
     return phenos
 
@@ -466,7 +405,7 @@ def load_data(args):
 
     phenos = load_phenos(args)
     train_files, val_files, test_files = gen_splits(args, phenos)
-    phenos.set_index('raw_text', inplace=True)
+    phenos.set_index(['subject_id', 'hadm_id', 'row_id'], inplace=True)
 
     train_dataset = MyDataset(args, tokenizer, train_files, phenos, train=True)
     val_dataset = MyDataset(args, tokenizer, val_files, phenos)

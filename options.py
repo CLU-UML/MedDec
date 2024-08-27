@@ -5,7 +5,6 @@ from datetime import datetime
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', default='./data/')
-    parser.add_argument('--pheno_path', default='./ACTdb102003.csv')
     parser.add_argument('--ckpt')
     parser.add_argument('--aim_repo', default='.')
     parser.add_argument('--aim_exp', default='mimic-decisions-1215')
@@ -20,7 +19,6 @@ def get_args():
     parser.add_argument('--grad_accumulation', default=2, type=int)
     parser.add_argument('--pheno_id', type=int)
     parser.add_argument('--unseen_pheno', type=int)
-    parser.add_argument('--pheno_n', type=int, default=500)
     parser.add_argument('--total_steps', type=int, default=5000)
     parser.add_argument('--train_log', type=int, default=500)
     parser.add_argument('--val_log', type=int, default=1000)

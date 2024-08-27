@@ -17,22 +17,46 @@ The user must sign a data usage agreement before accessing the dataset.
 
 The phenotype annotations used in the paper are available here: [https://physionet.org/content/phenotype-annotations-mimic/1.20.03/](https://physionet.org/content/phenotype-annotations-mimic/1.20.03/).
 
-# Installation
+# Prerequisites
 
+### Requirements
+
+Install the required packages using the following command:
 ```
 pip install -r requirements.txt
 ```
 
+### Extract Notes Text from MIMIC-III
+
+To extract the notes text from the MIMIC-III dataset, run the following command:
+```
+python extract_notes.py <data_dir> <notes_path (NOTEEVENTS.csv)>
+```
+The `data_dir` is the directory where the dataset is stored, and the `notes_path` is the path to the `NOTEEVENTS.csv` file. The texts will be written to the `data_dir/raw_text` directory.
+
+
+### Aggregate Phenotype Annotations
+
+To preprocess the phenotype annotations, run the following command:
+```
+python preprocess_phenotypes.py <phenotypes_path (ACTdb102003.csv)>
+```
+This script aggregates the multiple annotations per row from the phenotype annotations to a single label.
+
+The `phenotypes_path` is the path to the phenotype annotations. The aggregated annotations will be written to `phenos.csv` in the same directory as the input file.
+
 # Running the Baselines
+
+The code expects `data`, `raw_text`, and `phenos.csv` to be in the `data_dir` directory.
 
 To train the baselines, run the following command:
 ```
-python main.py --label_encoding multiclass --model_name google/electra-base-discriminator --total_steps 5000 --lr 4e-5
+python main.py --data_dir <data_dir> --label_encoding multiclass --model_name google/electra-base-discriminator --total_steps 5000 --lr 4e-5
 ```
 
 To evaluate the baselines, run the following command:
 ```
-python main.py --eval_only --ckpt ./checkpoints/[datetime]-[model_name]
+python main.py --data_dir <data_dir> --eval_only --ckpt ./checkpoints/[datetime]-[model_name]
 ```
 
 ## Arguments
