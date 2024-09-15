@@ -9,7 +9,7 @@ MedDec is the first dataset specifically developed for extracting and classifyin
 # Dataset
 
 > [!NOTE]
-> Currently under review on PhysioNet. Please check back on September 15, 2024.
+> Currently under review on PhysioNet. Please check back on October 1, 2024.
 
 The dataset is made available through this link: **[https://physionet.org/TBD](https://physionet.org/)**.
 
