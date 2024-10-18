@@ -8,12 +8,10 @@ MedDec is the first dataset specifically developed for extracting and classifyin
 
 # Dataset
 
-> [!NOTE]
-> Currently under review on PhysioNet. Please check back on October 1, 2024.
+> [!TIP]
+> The dataset has been released as of October 16, 2024.
 
-The dataset is made available through this link: **[https://physionet.org/TBD](https://physionet.org/)**.
-
-The user must sign a data usage agreement before accessing the dataset.
+The dataset is available through this link: **[https://physionet.org/content/meddec/1.0.0/](https://physionet.org/content/meddec/1.0.0/)**. The user must sign a data usage agreement before accessing the dataset.
 
 ### Phenotypes Annotations
 
@@ -34,8 +32,8 @@ To extract the notes text from the MIMIC-III dataset, run the following command:
 ```
 python extract_notes.py <data_dir> <notes_path (NOTEEVENTS.csv)>
 ```
-The `data_dir` is the directory where the dataset is stored, and the `notes_path` is the path to the `NOTEEVENTS.csv` file. The texts will be written to the `data_dir/raw_text` directory.
-
+- `data_dir`: Directory where the dataset is stored.
+- `notes_path`: Path to the `NOTEEVENTS.csv` file. The texts will be written to the `data_dir/raw_text` directory.
 
 ### Aggregate Phenotype Annotations
 
@@ -43,9 +41,7 @@ To preprocess the phenotype annotations, run the following command:
 ```
 python preprocess_phenotypes.py <phenotypes_path (ACTdb102003.csv)>
 ```
-This script aggregates the multiple annotations per row from the phenotype annotations to a single label.
-
-The `phenotypes_path` is the path to the phenotype annotations. The aggregated annotations will be written to `phenos.csv` in the same directory as the input file.
+- `phenotypes_path`: Path to the phenotype annotations. The aggregated annotations will be written to `phenos.csv` in the same directory as the input file.
 
 # Running the Baselines
 
@@ -81,19 +77,12 @@ python main.py --data_dir <data_dir> --eval_only --ckpt ./checkpoints/[datetime]
 
 # Citation
 
-If you use this dataset or code, please cite the following paper:
-
-```
+If you use this dataset or code, please consider citing the following paper:
+```bibtex
 @inproceedings{elgaar-etal-2024-meddec,
     title = "{M}ed{D}ec: A Dataset for Extracting Medical Decisions from Discharge Summaries",
-    author = "Elgaar, Mohamed  and
-      Cheng, Jiali  and
-      Vakil, Nidhi  and
-      Amiri, Hadi  and
-      Celi, Leo Anthony",
-    editor = "Ku, Lun-Wei  and
-      Martins, Andre  and
-      Srikumar, Vivek",
+    author = "Elgaar, Mohamed and Cheng, Jiali and Vakil, Nidhi and Amiri, Hadi and Celi, Leo Anthony",
+    editor = "Ku, Lun-Wei and Martins, Andre and Srikumar, Vivek",
     booktitle = "Findings of the Association for Computational Linguistics ACL 2024",
     month = aug,
     year = "2024",
@@ -101,5 +90,17 @@ If you use this dataset or code, please cite the following paper:
     publisher = "Association for Computational Linguistics",
     url = "https://aclanthology.org/2024.findings-acl.975",
     pages = "16442--16455",
+}
+```
+
+Additionally, please cite the dataset as follows:
+```bibtex
+@misc{elgaar2024meddec,
+    title = "MedDec: Medical Decisions for Discharge Summaries in the MIMIC-III Database",
+    author = "Elgaar, Mohamed and Cheng, Jiali and Vakil, Nidhi and Amiri, Hadi and Celi, Leo Anthony",
+    year = "2024",
+    version = "1.0.0",
+    publisher = "PhysioNet",
+    url = "https://doi.org/10.13026/nqnw-7d62"
 }
 ```
