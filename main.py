@@ -100,6 +100,9 @@ def id_to_label(labels):
     return new_labels
 
 def f1_score(ys, preds):
+    """
+    Compute F1-Score of the predictions
+    """
     tp = len(preds & ys)
     fn = len(ys) - tp
     fp = len(preds) - tp
@@ -107,6 +110,9 @@ def f1_score(ys, preds):
     return f1
 
 def recall_score(ys, preds):
+    """
+    Compute Recall of the predictions
+    """
     tp = len(preds & ys)
     fn = len(ys) - tp
     recall = tp / (tp + fn)
@@ -139,6 +145,9 @@ def calc_metrics_spans(ys, preds, span_ys = None):
     return f1, all_preds, all_ys, perclass
 
 def save_losses(model, crit, train_dataloader, val_dataloader, test_dataloader):
+    """
+    Save losses for train, val, and test sets
+    """
     train_losses = evaluate(model, train_dataloader, crit, return_losses = True)
     all_losses['train'].append(train_losses)
     val_losses = evaluate(model, val_dataloader, crit, return_losses = True)
