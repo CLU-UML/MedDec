@@ -22,6 +22,9 @@ all_losses = {'train': [], 'val': [], 'test': []}
 
 def indicators_to_spans(labels, idx = None):
     def add_span(idx, c, start, end):
+        """
+        Add span to spans, where span is a set: (idx, c, start, end)
+        """
         span = (idx, c, start, end)
         spans.add(span)
 
