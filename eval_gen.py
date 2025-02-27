@@ -4,6 +4,19 @@ from os import path
 
 # Non-exact span-match (plus-minus 50 chars)
 def get_tp(ys, preds, method='em'):
+    """
+    Calculate the number of true positives based on the given method.
+
+    Args:
+        ys (list): A list of true labels.
+        preds (list): A list of predicted labels.
+        method (str, optional): The method to use for comparison. 
+                                'em' for exact match, 'approx-m' for approximate match. 
+                                Defaults to 'em'.
+
+    Returns:
+        int: The count of true positives.
+    """
     c = 0
     for pred in all_preds:
         pred_sample, pred_cat, pred_dec = pred
@@ -23,6 +36,17 @@ def get_tp(ys, preds, method='em'):
 
 
 def f1_score(ys, preds, method='em'):
+    """
+    Calculate the F1 score for the given true labels and predicted labels.
+
+    Parameters:
+    ys (set): A set of true labels.
+    preds (set): A set of predicted labels.
+    method (str): The method to use for calculating true positives. Default is 'em'.
+
+    Returns:
+    float: The F1 score as a percentage.
+    """
     # tp = len(preds & ys)
     tp = get_tp(ys, preds, method)
     fn = len(ys) - tp
@@ -31,6 +55,16 @@ def f1_score(ys, preds, method='em'):
     return f1
 
 def process_labels(labels, sample):
+    """
+    Processes the given labels and sample to generate a set of tuples.
+
+    Args:
+        labels (dict): A dictionary where keys are categories (as strings) and values are lists of decisions (as strings).
+        sample (str): A sample identifier.
+
+    Returns:
+        set: A set of tuples, each containing the sample identifier, category (as an integer), and a stripped decision string.
+    """
     output = set()
     for cat, decs in labels.items():
         for dec in decs:
@@ -38,6 +72,17 @@ def process_labels(labels, sample):
     return output
 
 def process_preds(preds, sample, cat):
+    """
+    Processes predictions by associating each prediction with a sample and category.
+
+    Args:
+        preds (list of str): A list of prediction strings.
+        sample (str): The sample identifier.
+        cat (str): The category identifier.
+
+    Returns:
+        set: A set of tuples, each containing the sample, category, and a stripped prediction.
+    """
     output = set()
     for pred in preds:
         output.add((sample, cat, pred.strip()))

@@ -20,10 +20,26 @@ device = 'cuda:%s'%args.gpu
 all_losses = {'train': [], 'val': [], 'test': []}
 
 
-def indicators_to_spans(labels, idx = None):
+def indicators_to_spans(labels, idx = None) -> set:
+    """    
+    Convert label indicators to spans.
+
+    Args:
+        labels (list or numpy.ndarray): The label indicators. If `args.label_encoding` is 'multiclass', 
+            it should be a list of integers. Otherwise, it should be a 2D numpy array.
+        idx (int, optional): An optional index to include in the span. Defaults to None.
+
+    Returns:
+        spans: A set of spans, where each span is a tuple (idx, category, start, end).
+
+    The function processes the label indicators based on the label encoding specified in `args.label_encoding` 
+    and converts them into spans. The spans are represented as tuples containing the index, category, start, 
+    and end positions. The function supports different label encodings such as 'multiclass', 'bo', and 'boe'.
+    """
+
     def add_span(idx, c, start, end):
         """
-        Add span to spans, where span is a set: (idx, c, start, end)
+        Add single span to spans, where span is a set: (idx, c, start, end)
         """
         span = (idx, c, start, end)
         spans.add(span)
@@ -35,13 +51,13 @@ def indicators_to_spans(labels, idx = None):
         start = None
         cat = -1
         for t in range(num_tokens):
-            prev_tag = labels[t-1] if t > 0 else args.num_labels -1
+            prev_tag = labels[t-1] if t > 0 else args.num_labels -1 
             cur_tag = labels[t]
 
             if start is not None and cur_tag == cat + 1:
                 continue
             elif start is not None:
-                add_span(idx, cat // 2, start, t - 1)
+                add_span(idx, cat // 2, start, t - 1) # end = t-1
                 start = None
 
             if start is None and (cur_tag in [2*x for x in range(num_classes)]
@@ -49,7 +65,7 @@ def indicators_to_spans(labels, idx = None):
                                   and cur_tag != (args.num_labels - 1))):
                 start = t
                 cat = int(cur_tag) // 2 * 2
-    else:
+    else: # not multiclass
         num_tokens, num_classes = labels.shape
         if args.label_encoding == 'bo':
             num_classes //= 2
@@ -87,7 +103,17 @@ def indicators_to_spans(labels, idx = None):
     return spans
 
 
-def id_to_label(labels):
+def id_to_label(labels) -> list:
+    """
+    Converts a list of label IDs to their corresponding label strings.
+    Args:
+        labels (list of int): A list of label IDs.
+    Returns:
+        list of str: A list of label strings where:
+            - 'O' represents the label ID for 'Other'.
+            - 'B-x' represents the beginning of a chunk with label ID x.
+            - 'I-x' represents the inside of a chunk with label ID x.
+    """
     new_labels = []
     for l in labels:
         if l == (args.num_labels - 1):
@@ -119,6 +145,21 @@ def recall_score(ys, preds):
     return recall
 
 def calc_metrics_spans(ys, preds, span_ys = None):
+    """
+    Calculate F1 score and span metrics for predictions.
+
+    Args:
+        ys (list): List of ground truth labels.
+        preds (list): List of predicted labels.
+        span_ys (list, optional): List of ground truth spans. Defaults to None.
+
+    Returns:
+        tuple: A tuple containing:
+            - f1 (float): The overall F1 score.
+            - all_preds (set): A set of all predicted spans.
+            - all_ys (set): A set of all ground truth spans.
+            - perclass (dict): A dictionary with F1 scores per class.
+    """
     all_preds = []
     all_ys = []
     for i, (y, pred) in enumerate(zip(ys, preds)):
@@ -156,6 +197,27 @@ def save_losses(model, crit, train_dataloader, val_dataloader, test_dataloader):
     all_losses['test'].append(test_losses)
 
 def evaluate(model, dataloader, crit, return_losses = False, return_preds = False):
+    """
+    Evaluates the given model on the provided dataloader using the specified criterion.
+
+    Args:
+        model (torch.nn.Module): The model to evaluate.
+        dataloader (torch.utils.data.DataLoader): The dataloader providing the evaluation data.
+        crit (torch.nn.Module): The criterion (loss function) used for evaluation.
+        return_losses (bool, optional): If True, returns the individual losses for each batch. Defaults to False.
+        return_preds (bool, optional): If True, returns the predictions and corresponding spans. Defaults to False.
+
+    Returns:
+        tuple: A tuple containing:
+            - metrics_out (dict): A dictionary containing evaluation metrics such as 'f1' and 'acc'.
+            - pheno_results (dict or None): A dictionary containing phenotype-specific F1 scores if applicable, 
+                otherwise None.
+            - loss (torch.Tensor): The mean loss over the evaluation dataset.
+            - perclass (dict): A dictionary containing per-class evaluation metrics.
+            - (optional) losses (list): A list of individual losses for each batch if return_losses is True.
+            - (optional) span_preds (list): A list of predicted spans if return_preds is True.
+            - (optional) span_ys (list): A list of ground truth spans if return_preds is True.
+    """
     model.eval()
     outs, ys = [], []
     lens = []
@@ -297,6 +359,20 @@ def process(sample, model, tokenizer, out_dir):
             json.dump(all_spans, f)
 
 def predict_mimic(model, data, tokenizer):
+    """
+    Predicts medical decisions using the given model and data.
+
+    Args:
+        model (torch.nn.Module): The trained model to use for predictions.
+        data (iterable): The dataset to predict on.
+        tokenizer (Tokenizer): The tokenizer to preprocess the data.
+
+    Returns:
+        None
+
+    This function sets the model to evaluation mode and processes the data in parallel using multiprocessing.
+    The results are saved in the specified output directory.
+    """
 
     model.eval()
     outs = []
@@ -313,8 +389,24 @@ def predict_mimic(model, data, tokenizer):
     # for sample in tqdm(data):
     #     process(sample)
 
-def train(args, model, crit, optimizer, lr_scheduler,
-        train_dataloader, val_dataloader, verbose=True, train_ns=None, test_dataloader=None):
+def train(args, model, crit, optimizer, lr_scheduler, train_dataloader, val_dataloader, 
+          verbose=True, train_ns=None, test_dataloader=None):
+    """
+    Train the model with the given parameters.
+    Args:
+        args (Namespace): Arguments containing training configurations.
+        model (torch.nn.Module): The model to be trained.
+        crit (torch.nn.Module): The loss function.
+        optimizer (torch.optim.Optimizer): The optimizer for training.
+        lr_scheduler (torch.optim.lr_scheduler._LRScheduler): Learning rate scheduler.
+        train_dataloader (DataLoader): DataLoader for the training data.
+        val_dataloader (DataLoader): DataLoader for the validation data.
+        verbose (bool, optional): If True, prints training progress. Defaults to True.
+        train_ns (optional): Additional training namespace. Defaults to None.
+        test_dataloader (DataLoader, optional): DataLoader for the test data. Defaults to None.
+    Returns:
+        tuple: Best F1 score, best accuracy, and the step at which the best F1 score was achieved.
+    """
     writer = aim.Run(experiment=args.aim_exp, repo=args.aim_repo, 
             system_tracking_interval=0) if not args.debug else None
     if writer is not None:
@@ -406,6 +498,20 @@ def train(args, model, crit, optimizer, lr_scheduler,
     return best_f1, best_acc, best_step
 
 def main(args):
+    """
+    Main function to train and evaluate a model based on the provided arguments.
+
+    Args:
+        args (Namespace): A namespace object containing various arguments and configurations 
+                          for training and evaluation. Expected attributes include:
+                          - seed (list of int): List of random seeds for reproducibility.
+                          - eval_only (bool): Flag to indicate if only evaluation should be performed.
+                          - verbose (bool): Flag to control verbosity of training output.
+                          - save_losses (bool): Flag to indicate if losses should be saved.
+
+    Returns:
+        float: The mean F1 score across different seeds.
+    """
     f1s = []
     for seed in args.seed:
         torch.manual_seed(seed)

@@ -10,6 +10,7 @@ import pandas as pd
 import os, sys
 
 def aggregate_annotations(df):
+
     def process_group(group):
         if len(group) == 1:
             return process_single_annotation(group.iloc[0])
@@ -17,10 +18,36 @@ def aggregate_annotations(df):
             return process_multiple_annotations(group)
 
     def process_single_annotation(row):
+        """
+        Processes a single annotation row to generate a phenotype label.
+
+        Args:
+            row (pd.Series): A pandas Series object representing a single row of data.
+
+        Returns:
+            pd.Series: A pandas Series object with a single key 'phenotype_label' containing a 
+                       comma-separated string of phenotype labels. If no phenotype labels are 
+                       found, returns '?'.
+        """
         phenotype_label = [col if col != 'UNSURE' else '?' for col in PHENOTYPE_COLUMNS if row[col] > 0]
         return pd.Series({'phenotype_label': ','.join(phenotype_label) if phenotype_label else '?'})
 
     def process_multiple_annotations(group):
+        """
+        Processes a group of annotations by prioritizing certain operators and summarizing phenotype labels.
+        Args:
+            group (pd.DataFrame): A DataFrame containing annotation data with columns 'BATCH.ID', 'OPERATOR', 
+                and phenotype columns.
+        Returns:
+            pd.Series: A Series with the summarized phenotype label and concatenated operator names.
+            
+        The function performs the following steps:
+        1. Prioritizes annotations based on predefined operator groups.
+        2. Drops duplicate rows based on all columns except 'BATCH.ID' and 'OPERATOR'.
+        3. If there are multiple unique rows and any of them have a 'NONE' phenotype, returns a '?' phenotype label.
+        4. Sums over phenotype columns and concatenates operator names.
+        5. Generates a phenotype label based on the summed phenotype columns, replacing 'UNSURE' with '?'.
+        """
         priority_operators = [['DAG', 'PAT'], ['JTW', 'JF'], ['ETM', 'JW']]
         for operator_group in priority_operators:
             if group['OPERATOR'].isin(operator_group).any():

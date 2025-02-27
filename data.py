@@ -26,6 +26,26 @@ rev_pheno_map = {v: k for k,v in pheno_map.items()}
 valid_cats = range(0,9)
 
 def gen_splits(args, phenos):
+    """
+    Generates training, validation, and test splits for the dataset based on the provided arguments and phenotypes.
+
+    Parameters:
+    args (Namespace): A namespace object containing the following attributes:
+        - unseen_pheno (str or None): The phenotype to be excluded from training and validation sets.
+        - data_dir (str): The directory where the data is stored.
+        - task (str): The task type, either 'token' or another task.
+        - pheno_id (bool): A flag indicating whether to use phenotype IDs.
+    phenos (DataFrame or None): A DataFrame containing phenotype information with columns 'subject_id' and 'phenotype_label'.
+
+    Returns:
+    tuple: A tuple containing three elements:
+        - train (list or DataFrame): The training set, either as a list of file paths or a DataFrame of subjects.
+        - val (list or DataFrame): The validation set, either as a list of file paths or a DataFrame of subjects.
+        - test (list or DataFrame): The test set, either as a list of file paths or a DataFrame of subjects.
+
+    Raises:
+    ValueError: If phenos is None and args.task is not 'token'.
+    """
     if args.unseen_pheno is None:
         splits_dir = os.path.join(args.data_dir, 'splits')
         train_files = open(os.path.join(splits_dir, 'train.txt')).read().splitlines()
@@ -151,6 +171,20 @@ class MyDataset(Dataset):
         return np.array([x[col] for x in self.data])
 
     def load_phenos(self, args, row, idx):
+        """
+        Loads and processes phenotype data for a given row.
+
+        Args:
+            args: An object containing various configuration parameters.
+            row: A dictionary containing data for a specific row, including 'subject_id', 'hadm_id', 'row_id', and 'phenotype_label'.
+            idx: An index value (not used in the current implementation).
+
+        Returns:
+            tuple: A tuple containing:
+                - input_ids: Tokenized input IDs from the text file.
+                - labels: A numpy array of phenotype labels.
+                - ids: Currently set to None.
+        """
         txt_path = os.path.join(args.data_dir, f'raw_text/{row["subject_id"]}_{row["hadm_id"]}_{row["row_id"]}.txt')
         text = open(txt_path).read()
         encoding = self.tokenizer.encode_plus(text,
@@ -173,6 +207,23 @@ class MyDataset(Dataset):
         return encoding['input_ids'], labels, ids
 
     def load_decisions(self, args, fn, idx, phenos):
+        """
+        Load decision annotations and encode text data for a given file.
+        Args:
+            args (Namespace): Arguments containing configuration parameters.
+            fn (str): Filename of the data file to load.
+            idx (int): Index of the current sample.
+            phenos (DataFrame): DataFrame containing phenotype labels.
+        Returns:
+            dict: A dictionary containing encoded input IDs, labels, token-to-character mapping, 
+                  and additional information if not in training mode.
+        Raises:
+            ValueError: If encoding start or end positions are None.
+        Notes:
+            - The function reads the text data from a file, encodes it using a tokenizer, and processes annotations.
+            - It supports different label encoding schemes: 'multiclass', 'bo', 'boe', and default.
+            - If not in training mode, additional information such as spans, file name, and token mask is included in the results.
+        """
         basename = os.path.splitext(os.path.basename(fn))[0]
         file_dir = os.path.join(args.data_dir, 'data', fn)
 
@@ -283,6 +334,16 @@ class MyDataset(Dataset):
         return len(self.data)
 
 def parse_cat(cat):
+    """
+    Parses a string to extract the first numeric value.
+
+    Args:
+        cat (str): The input string to parse.
+
+    Returns:
+        int or None: The first numeric value found in the string as an integer.
+                     If no numeric value is found, returns None.
+    """
     for i,c in enumerate(cat):
         if c.isnumeric():
             if cat[i+1].isnumeric():
@@ -292,6 +353,18 @@ def parse_cat(cat):
 
 
 def load_phenos(args):
+    """
+    Load and preprocess phenotype data from a CSV file.
+
+    Args:
+        args: An object containing the attribute 'data_dir', which specifies the directory path where the 'phenos.csv' file is located.
+
+    Returns:
+        pandas.DataFrame: A DataFrame containing the preprocessed phenotype data with the following modifications:
+            - The column 'Ham_ID' is renamed to 'HADM_ID'.
+            - Rows with 'phenotype_label' equal to '?' are removed.
+            - All column names are converted to lowercase.
+    """
     phenos = pd.read_csv(os.path.join(args.data_dir, 'phenos.csv'))
     phenos.rename({'Ham_ID': 'HADM_ID'}, inplace=True, axis=1)
     phenos = phenos[phenos.phenotype_label != '?']
@@ -299,6 +372,22 @@ def load_phenos(args):
     return phenos
 
 def downsample(dataset):
+    """
+    Downsamples the dataset to balance the classes.
+
+    This function takes a dataset and downsamples the majority class to match the number of samples
+    in the minority class. It assumes that the dataset has a 'data' attribute, which is a list of 
+    samples, and that each sample is a tuple where the second element is a list containing the class 
+    label at index 0.
+
+    Parameters:
+    dataset (object): An object with a 'data' attribute, which is a list of samples. Each sample is 
+                      expected to be a tuple where the second element is a list containing the class 
+                      label at index 0.
+
+    Returns:
+    None: The function modifies the dataset in place.
+    """
     data = dataset.data
     class0 = [x for x in data if x[1][0] == 0]
     class1 = [x for x in data if x[1][0] == 1]
@@ -310,6 +399,16 @@ def downsample(dataset):
     dataset.data = class0 + class1
 
 def upsample(dataset):
+    """
+    Upsamples the minority class in the given dataset to match the size of the majority class.
+
+    Parameters:
+    dataset (object): An object containing the dataset. It is expected to have a 'data' attribute,
+                      which is a list of tuples where the second element is a list containing the class label.
+
+    Returns:
+    None: The function modifies the dataset in place by upsampling the minority class.
+    """
     data = dataset.data
     class0 = [x for x in data if x[1][0] == 0]
     class1 = [x for x in data if x[1][0] == 1]
@@ -324,6 +423,28 @@ def load_tokenizer(name):
     return AutoTokenizer.from_pretrained(name)
 
 def load_data(args):
+    """
+    Load and preprocess data for training, validation, and testing.
+
+    Args:
+        args (Namespace): A namespace object containing various arguments and configurations.
+
+    Returns:
+        tuple: A tuple containing the following elements:
+            - train_dataloader (DataLoader): DataLoader for the training dataset with segmented collation.
+            - val_dataloader (DataLoader): DataLoader for the validation dataset with full collation.
+            - test_dataloader (DataLoader): DataLoader for the test dataset with full collation.
+            - train_ns (DataLoader): DataLoader for the training dataset with full collation and batch size of 1.
+
+    The function performs the following steps:
+        1. Defines two collation functions: `collate_segment` and `collate_full`.
+        2. Loads the tokenizer and sets vocabulary size and maximum length.
+        3. Loads phenotype data and generates train, validation, and test splits.
+        4. Creates datasets for training, validation, and testing.
+        5. Optionally resamples the training dataset based on the `args.resample` parameter.
+        6. Prints the sizes of the train, validation, and test datasets.
+        7. Creates DataLoaders for the train, validation, and test datasets with appropriate collation functions.
+    """
     from sklearn.utils import resample
     def collate_segment(batch):
         xs = []
@@ -376,6 +497,21 @@ def load_data(args):
         return {'input_ids': xs, 'labels': ys, 'ids': ids, 'mask': masks, 't2c': t2cs}
 
     def collate_full(batch):
+        """
+        Collates a batch of data samples into a single batch suitable for model input.
+
+        Args:
+            batch (list of dict): A list of dictionaries where each dictionary represents a single data sample.
+                Each dictionary should contain the keys 'input_ids', 'labels', and optionally 'all_spans' and 'file_name'.
+
+        Returns:
+            dict: A dictionary containing the collated batch data. The keys are:
+                - 'input_ids': A tensor of padded input IDs.
+                - 'labels': A tensor of padded labels.
+                - 'mask': A tensor indicating the valid positions in the input IDs.
+                - 'all_spans' (optional): A list of all spans from the batch.
+                - 'file_name' (optional): A list of file names from the batch.
+        """
         lens = [len(x['input_ids']) for x in batch]
         max_len = max(args.max_len, max(lens))
         for i in range(len(batch)):
