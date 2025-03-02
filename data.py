@@ -46,17 +46,17 @@ def gen_splits(args, phenos):
     Raises:
     ValueError: If phenos is None and args.task is not 'token'.
     """
-    if args.unseen_pheno is None:
-        splits_dir = os.path.join(args.data_dir, 'splits')
-        train_files = open(os.path.join(splits_dir, 'train.txt')).read().splitlines()
-        val_files = open(os.path.join(splits_dir, 'val.txt')).read().splitlines()
-        test_files = open(os.path.join(splits_dir, 'test.txt')).read().splitlines()
-        return train_files, val_files, test_files
-
+    #if args.unseen_pheno is None:
+    #    splits_dir = os.path.join(args.data_dir, 'splits')
+    #    train_files = open(os.path.join(splits_dir, 'train.txt')).read().splitlines()
+    #    val_files = open(os.path.join(splits_dir, 'val.txt')).read().splitlines()
+    #    test_files = open(os.path.join(splits_dir, 'test.txt')).read().splitlines()
+    #    return train_files, val_files, test_files
 
     np.random.seed(0)
     if args.task == 'token':
-        files = glob(os.path.join(args.data_dir, 'data/**/*'))
+        #files = glob(os.path.join(args.data_dir, 'data/**/*'))
+        files = glob(os.path.join(args.data_dir, 'data/*.json'))
         files = ["/".join(x.split('/')[-2:]) for x in files]
         subjects = np.unique([os.path.basename(x).split('_')[0] for x in files])
     elif phenos is not None:
@@ -67,6 +67,7 @@ def gen_splits(args, phenos):
     phenos['phenotype_label'] = phenos['phenotype_label'].apply(lambda x: x.lower())
 
     n = len(subjects)
+    print('Number of subjects:', n)
     train_count = int(0.8*n)
     val_count = max(0, int(0.9*n) - train_count)
     test_count = n - train_count - val_count
@@ -155,10 +156,10 @@ class MyDataset(Dataset):
         self.train = train
         self.pheno_ids = defaultdict(list)
         self.dec_ids = {k: [] for k in pheno_map.keys()}
-        self.meddec_stats = pd.read_csv(os.path.join(args.data_dir, 'stats.csv')).set_index(['SUBJECT_ID', 'HADM_ID', 'ROW_ID'])
-        self.stats = defaultdict(list)
+        #self.meddec_stats = pd.read_csv(os.path.join(args.data_dir, 'stats.csv')).set_index(['SUBJECT_ID', 'HADM_ID', 'ROW_ID'])
+        #elf.stats = defaultdict(list)
 
-        if args.task == 'seq':
+        if args.task == 'seq': # phenotype prediction
             for i, row in data_source.iterrows():
                 sample = self.load_phenos(args, row, i)
                 self.data.append(sample)
@@ -225,7 +226,7 @@ class MyDataset(Dataset):
             - If not in training mode, additional information such as spans, file name, and token mask is included in the results.
         """
         basename = os.path.splitext(os.path.basename(fn))[0]
-        file_dir = os.path.join(args.data_dir, 'data', fn)
+        file_dir = os.path.join(args.data_dir, fn)
 
         sid, hadm, rid = map(int, basename.split('_')[:3])
         txt_path = os.path.join(args.data_dir, f'raw_text/{basename}.txt')
@@ -310,11 +311,11 @@ class MyDataset(Dataset):
             else:
                 labels[enc_start:enc_end, cat] = 1
 
-        row = self.meddec_stats.loc[sid, hadm, rid]
+        #row = self.meddec_stats.loc[sid, hadm, rid]
 
-        self.stats['gender'].append(row.GENDER)
-        self.stats['ethnicity'].append(row.ETHNICITY)
-        self.stats['language'].append(row.LANGUAGE)
+        #self.stats['gender'].append(row.GENDER)
+        #self.stats['ethnicity'].append(row.ETHNICITY)
+        #self.stats['language'].append(row.LANGUAGE)
 
         results = {
                 'input_ids': encoding['input_ids'],
@@ -447,6 +448,24 @@ def load_data(args):
     """
     from sklearn.utils import resample
     def collate_segment(batch):
+        """
+        Collates a batch of data for segment processing.
+
+        Args:
+            batch (list of dict): A list of dictionaries where each dictionary contains the keys:
+                - 'input_ids' (list): The input token IDs.
+                - 'labels' (list): The labels corresponding to the input tokens.
+                - 't2c' (any): Additional data associated with the batch.
+                - 'ids' (optional, list): Optional IDs associated with the input tokens.
+
+        Returns:
+            dict: A dictionary containing the collated batch data with the keys:
+                - 'input_ids' (torch.Tensor): Tensor of input token IDs.
+                - 'labels' (torch.Tensor): Tensor of labels.
+                - 'ids' (list or None): List of IDs if present in the input batch, otherwise None.
+                - 'mask' (torch.Tensor): Tensor mask indicating valid token positions.
+                - 't2c' (list): List of additional data associated with the batch.
+        """
         xs = []
         ys = []
         t2cs = []

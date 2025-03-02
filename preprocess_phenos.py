@@ -100,3 +100,5 @@ if __name__ == "__main__":
     # Aggregate annotations
     result_df = aggregate_annotations(df)
     result_df.to_csv(OUTPUT_FILE, index=False)
+
+# Run: python preprocess_phenos.py "data_dir/ACTdb102003.csv"

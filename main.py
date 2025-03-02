@@ -16,7 +16,8 @@ mean = lambda l: sum(l)/len(l) if len(l) > 0 else .0
 
 args = get_args()
 
-device = 'cuda:%s'%args.gpu
+# device = 'cuda:%s'%args.gpu
+device = 'cuda' if torch.cuda.is_available() else 'mps'
 all_losses = {'train': [], 'val': [], 'test': []}
 
 
@@ -276,7 +277,7 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
     y = torch.cat(ys, 1).squeeze()
 
     if len(token_masks) > 0:
-        token_masks = torch.cat(token_masks, 1).squeeze().to(device)
+        token_masks = torch.cat(token_masks, 1).squeeze().to(torch.int32).to(device)
         acc = ((ys_stack == preds_stack).float() * token_masks).sum() / token_masks.sum() * 100
     else:
         acc = (ys_stack == preds_stack).float().mean() * 100
@@ -286,6 +287,7 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
         span_ys = [(i, s['label'], s['token_start'], s['token_end']) for i, spans in enumerate(all_spans) for s in spans[0]]
     else:
         span_ys = None
+    print('Calculating metrics...')
     f1, span_preds, span_ys, perclass = calc_metrics_spans(ys, preds, span_ys)
     if return_preds:
         return span_preds, span_ys
@@ -319,6 +321,7 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
     #     print(l, sub_acc)
 
     if args.task == 'token':
+        print('Calculating pheno results...')
         pheno_results = {}
         for pheno, ids in dataloader.dataset.pheno_ids.items():
             sub_ys = [x for i,x in enumerate(ys) if i in ids]
@@ -330,6 +333,18 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
     return metrics_out, pheno_results, loss, perclass
 
 def process(sample, model, tokenizer, out_dir):
+    """
+    Processes a given sample using a specified model and tokenizer, and saves the output to a JSON file.
+
+    Args:
+        sample (dict): A dictionary containing the sample data with keys 'HADM_ID', 'SUBJECT_ID', 'ROW_ID', and 'TEXT'.
+        model (torch.nn.Module): The model used for generating predictions.
+        tokenizer (transformers.PreTrainedTokenizer): The tokenizer used for encoding the sample text.
+        out_dir (str): The directory where the output JSON file will be saved.
+
+    Returns:
+        None
+    """
     hadm = sample['HADM_ID']
     fn = f"{sample['SUBJECT_ID']}_{int(hadm) if not pd.isnull(hadm) else 'NaN'}_{sample['ROW_ID']}.json"
     out_file = out_dir + fn
@@ -514,11 +529,15 @@ def main(args):
     """
     f1s = []
     for seed in args.seed:
+        print('-----------------------------------')
+        print('Seed:', seed)
         torch.manual_seed(seed)
         np.random.seed(seed)
         args.seed = seed
         train_dataloader, val_dataloader, test_dataloader, train_ns = load_data(args)
+        print('Data loaded')
         model, crit, optimizer, lr_scheduler = load_model(args, device)
+        print('Model loaded')
 
         if not args.eval_only:
             f1, acc, step = train(args, model, crit, 
@@ -562,3 +581,5 @@ def main(args):
 
 if __name__ == '__main__':
     main(args)
+
+# python main.py --data_dir "data_dir/" --label_encoding multiclass --model_name google/electra-base-discriminator --total_steps 5000 --lr 4e-5 --eval_only
