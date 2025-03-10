@@ -40,7 +40,8 @@ def get_args():
     args = parser.parse_args()
 
     curtime = datetime.now().strftime('%m%d_%H-%M-%S')
-    args.ckpt_dir = './checkpoints/%s-%s-%s'%(curtime, os.path.basename(args.model_name), args.model)
+    #args.ckpt_dir = './checkpoints/%s-%s-%s'%(curtime, os.path.basename(args.model_name), args.model)
+    args.ckpt_dir = '/checkpoints/%s-%s-%s'%(curtime, os.path.basename(args.model_name), args.model)
     args.seed = [int(x) for x in args.seed.split(',')]
 
     if args.task == 'seq' and args.pheno_id is not None:
@@ -48,9 +49,9 @@ def get_args():
     elif args.task == 'seq':
         args.num_labels = args.num_phenos
     elif args.task == 'token':
-        args.num_labels = args.num_decs
+        args.num_labels = args.num_decs 
         if args.label_encoding == 'multiclass':
-            args.num_labels = args.num_labels * 2 + 1
+            args.num_labels = args.num_labels * 2 + 1 # 9*2+1=19
         elif args.label_encoding == 'bo':
             args.num_labels *= 2
         elif args.label_encoding == 'boe':

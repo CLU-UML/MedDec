@@ -186,6 +186,7 @@ class MyDataset(Dataset):
                 - labels: A numpy array of phenotype labels.
                 - ids: Currently set to None.
         """
+        print('\nMyDataset.load_phenos() debugging:')
         txt_path = os.path.join(args.data_dir, f'raw_text/{row["subject_id"]}_{row["hadm_id"]}_{row["row_id"]}.txt')
         text = open(txt_path).read()
         encoding = self.tokenizer.encode_plus(text,
@@ -312,7 +313,6 @@ class MyDataset(Dataset):
                 labels[enc_start:enc_end, cat] = 1
 
         #row = self.meddec_stats.loc[sid, hadm, rid]
-
         #self.stats['gender'].append(row.GENDER)
         #self.stats['ethnicity'].append(row.ETHNICITY)
         #self.stats['language'].append(row.LANGUAGE)
@@ -366,10 +366,12 @@ def load_phenos(args):
             - Rows with 'phenotype_label' equal to '?' are removed.
             - All column names are converted to lowercase.
     """
+    print('\nload_phenos debugging:')
     phenos = pd.read_csv(os.path.join(args.data_dir, 'phenos.csv'))
     phenos.rename({'Ham_ID': 'HADM_ID'}, inplace=True, axis=1)
     phenos = phenos[phenos.phenotype_label != '?']
     phenos.rename(lambda k: k.lower(), inplace=True, axis = 1)
+    print(phenos.head(2))
     return phenos
 
 def downsample(dataset):
@@ -571,9 +573,7 @@ def load_data(args):
     elif args.resample == 'up':
         upsample(train_dataset)
 
-    print('Train dataset:', len(train_dataset))
-    print('Val dataset:', len(val_dataset))
-    print('Test dataset:', len(test_dataset))
+    print('Lenght Test dataset:', len(test_dataset))
 
     train_ns = DataLoader(train_dataset, 1, False,
             collate_fn=collate_full,

@@ -58,7 +58,7 @@ def indicators_to_spans(labels, idx = None) -> set:
             if start is not None and cur_tag == cat + 1:
                 continue
             elif start is not None:
-                add_span(idx, cat // 2, start, t - 1) # end = t-1
+                add_span(idx, cat // 2, start, t - 1) # c = cat//2 ; end = t-1
                 start = None
 
             if start is None and (cur_tag in [2*x for x in range(num_classes)]
@@ -66,6 +66,7 @@ def indicators_to_spans(labels, idx = None) -> set:
                                   and cur_tag != (args.num_labels - 1))):
                 start = t
                 cat = int(cur_tag) // 2 * 2
+
     else: # not multiclass
         num_tokens, num_classes = labels.shape
         if args.label_encoding == 'bo':
@@ -127,9 +128,7 @@ def id_to_label(labels) -> list:
     return new_labels
 
 def f1_score(ys, preds):
-    """
-    Compute F1-Score of the predictions
-    """
+    """Compute F1-Score of the predictions"""
     tp = len(preds & ys)
     fn = len(ys) - tp
     fp = len(preds) - tp
@@ -137,9 +136,7 @@ def f1_score(ys, preds):
     return f1
 
 def recall_score(ys, preds):
-    """
-    Compute Recall of the predictions
-    """
+    """Compute Recall of the predictions"""
     tp = len(preds & ys)
     fn = len(ys) - tp
     recall = tp / (tp + fn)
@@ -187,9 +184,7 @@ def calc_metrics_spans(ys, preds, span_ys = None):
     return f1, all_preds, all_ys, perclass
 
 def save_losses(model, crit, train_dataloader, val_dataloader, test_dataloader):
-    """
-    Save losses for train, val, and test sets
-    """
+    """Save losses for train, val, and test sets."""
     train_losses = evaluate(model, train_dataloader, crit, return_losses = True)
     all_losses['train'].append(train_losses)
     val_losses = evaluate(model, val_dataloader, crit, return_losses = True)
@@ -224,7 +219,7 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
     lens = []
     token_masks = []
     for batch in tqdm(dataloader, desc='Evaluation'):
-        x = batch['input_ids']
+        x = batch['input_ids'] # 1 value, as we have batches of 1 doc.
         y = batch['labels']
         mask = batch['mask']
         if args.task == 'seq':
@@ -232,7 +227,7 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
 
         with torch.no_grad():
             logits = model.generate(x, mask)
-
+        
         outs.append(logits)
         lens.extend([x.shape[0] for x in logits])
         ys.append(y)
@@ -240,10 +235,14 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
         if 'token_mask' in batch:
             token_masks.append(batch['token_mask'])
 
+    # lenghts of ys is 44, as we have 44 documents in the test set.
     if args.label_encoding == 'multiclass':
         outs_stack = torch.cat([x.view(-1, args.num_labels) for x in outs], 0)
-        ys_stack = torch.cat([x.view(-1) for x in ys], 0).to(device)
+        # ys_stack = torch.cat([x.view(-1) for x in ys], 0).to(device)
+        ys_stack = torch.cat([x.view(-1) for x in ys], 0).squeeze(0).to(device)
+
         preds = [x.squeeze() for x in outs]
+        # len(ys_stack): 153675 len(preds): 44
 
         if args.use_crf:
             padded_outs = torch.nn.utils.rnn.pad_sequence(preds, batch_first=True)
@@ -261,6 +260,9 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
         outs_stack = torch.cat(outs, 1)
         ys_stack = torch.cat(ys, 1).to(device)
         loss = crit(outs_stack, ys_stack)
+    
+    # Ground Truth Label Distribution: Counter({18: 61646, 13: 26442, 5: 25822, 9: 17517, 11: 6443, 1: 6335, 17: 3444, 
+    # 4: 2297, 8: 1257, 12: 777, 10: 714, 3: 296, 0: 259, 16: 158, 7: 130, 15: 81, 2: 31, 6: 15, 14: 11})
 
     losses = []
     offset = 0
@@ -287,6 +289,7 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
         span_ys = [(i, s['label'], s['token_start'], s['token_end']) for i, spans in enumerate(all_spans) for s in spans[0]]
     else:
         span_ys = None
+      
     print('Calculating metrics...')
     f1, span_preds, span_ys, perclass = calc_metrics_spans(ys, preds, span_ys)
     if return_preds:
@@ -321,7 +324,6 @@ def evaluate(model, dataloader, crit, return_losses = False, return_preds = Fals
     #     print(l, sub_acc)
 
     if args.task == 'token':
-        print('Calculating pheno results...')
         pheno_results = {}
         for pheno, ids in dataloader.dataset.pheno_ids.items():
             sub_ys = [x for i,x in enumerate(ys) if i in ids]
@@ -507,9 +509,10 @@ def train(args, model, crit, optimizer, lr_scheduler, train_dataloader, val_data
             for pheno, f1 in best_pheno.items():
                 writer.track(f1, name='best_f1', context={'group': pheno})
         if args.task == 'token':
-            f1s = best_perclass
-            for i in range(len(f1s)):
-                writer.track(f1s[i], name='best_f1', context={'decision': i})
+            #f1s = best_perclass
+            #for i in range(len(f1s)):
+            #    writer.track(f1s[i], name='best_f1', context={'decision': i})
+            pass
     return best_f1, best_acc, best_step
 
 def main(args):
@@ -527,32 +530,36 @@ def main(args):
     Returns:
         float: The mean F1 score across different seeds.
     """
+    # os.system("killall -9 Python")
+    
     f1s = []
+    print('Starting main...')
     for seed in args.seed:
-        print('-----------------------------------')
-        print('Seed:', seed)
+        print(f'---------------- Seed : {seed} ----------------')
         torch.manual_seed(seed)
         np.random.seed(seed)
         args.seed = seed
         train_dataloader, val_dataloader, test_dataloader, train_ns = load_data(args)
-        print('Data loaded')
         model, crit, optimizer, lr_scheduler = load_model(args, device)
-        print('Model loaded')
 
         if not args.eval_only:
+            print('Training...')
             f1, acc, step = train(args, model, crit, 
                     optimizer, lr_scheduler, train_dataloader,
                     val_dataloader, args.verbose, train_ns, test_dataloader)
             f1s.append(f1)
             print('seed: %d, F1: %.1f, Acc: %.1f'%(seed, f1, acc))
-            # Test
+
+            print('Testing...')
             metrics_out, pheno_results, loss, perclass = evaluate(model, test_dataloader, crit)
             f1, acc = metrics_out['f1'], metrics_out['acc']
             print('[Test] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
                     .format(f1, acc, loss))
             # print(pheno_results)
             print(perclass)
+
         else:
+            print('Testing...')
             model.eval()
             # Train
             # metrics_out, pheno_results, loss = evaluate(model, train_ns, crit)
@@ -569,8 +576,7 @@ def main(args):
             # Test
             metrics_out, pheno_results, loss, perclass = evaluate(model, test_dataloader, crit)
             f1, acc = metrics_out['f1'], metrics_out['acc']
-            print('[Test] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'
-                    .format(f1, acc, loss))
+            print('[Test] f1: {:.1f}, acc: {:.1f}, loss: {:.3f}'.format(f1, acc, loss))
             # print(pheno_results)
             print(perclass)
 
@@ -582,4 +588,23 @@ def main(args):
 if __name__ == '__main__':
     main(args)
 
-# python main.py --data_dir "data_dir/" --label_encoding multiclass --model_name google/electra-base-discriminator --total_steps 5000 --lr 4e-5 --eval_only
+# Train:
+    # python main.py --data_dir data_dir/ --label_encoding multiclass --model_name nlpie/distil-biobert --total_steps 500 --lr 4e-5
+
+# Eval:
+    # python main.py --data_dir data_dir --label_encoding multiclass --model_name answerdotai/ModernBERT-base --eval_only
+    # python main.py --data_dir data_dir --eval_only --ckpt ./checkpoints/0302_17-47-24-ModernBERT-base
+
+# Available options:
+    # --ckpt option is used to load the model from the checkpoint file.
+    # --model_name option is used to specify the model to be used.
+    # --data_dir option is used to specify the directory containing the data.
+    # --label_encoding option is used to specify the label encoding.
+
+# Models to test:
+    # Big models:
+        # google/electra-base-discriminator
+        # answerdotai/ModernBERT-base
+    # Smaller models:        
+        # nlpie/distil-biobert
+

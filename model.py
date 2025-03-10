@@ -96,13 +96,15 @@ class MyModel(nn.Module):
                 outs.append(logits)
 
             return torch.max(torch.stack(outs, 1), 1).values
+        
         elif self.args.task == 'token':
             for i, offset in enumerate(range(0, x.shape[1], self.args.max_len)):
                 segment = x[:, offset:offset + self.args.max_len]
                 segment_mask = mask[:, offset:offset + self.args.max_len]
                 h = self.decisions(segment, segment_mask)[0].last_hidden_state
                 outs.append(h)
-            h = torch.cat(outs, 1)
+            h = torch.cat(outs, 1)  # [batch_size, total_sequence_length, hidden_dim]
+            h = h.view(-1, h.shape[-1])  # [batch_size * total_sequence_length, hidden_dim]
             return self.classifier(h)
 
 
