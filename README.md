@@ -12,6 +12,7 @@ MedDec is the first dataset specifically developed for extracting and classifyin
 - [Utilities](#utilities)
 - [Running the Baselines](#running-the-baselines)
 - [Shared Task](#shared-task)
+- [Additional Notes](#additional-notes)
 - [Citation](#citation)
 
 # Dataset
@@ -20,10 +21,6 @@ MedDec is the first dataset specifically developed for extracting and classifyin
 > The dataset has been released as of October 16, 2024.
 
 The dataset is available through this link: **[https://physionet.org/content/meddec/1.0.0/](https://physionet.org/content/meddec/1.0.0/)**. The user must sign a data usage agreement before accessing the dataset.
-
-### Phenotypes Annotations
-
-The phenotype annotations used in the paper are available here: [https://physionet.org/content/phenotype-annotations-mimic/1.20.03/](https://physionet.org/content/phenotype-annotations-mimic/1.20.03/).
 
 # Prerequisites
 
@@ -75,17 +72,6 @@ Run:
 ```
 python clean_data.py --data_dir MedDec
 ```
-
-### Aggregate Phenotype Annotations
-
-To preprocess the phenotype annotations, run the following command:
-```
-python preprocess_phenos.py <phenotypes_path (ACTdb102003.csv)>
-```
-- `phenotypes_path`: Path to the phenotype annotations. The aggregated annotations will be written to `phenos.csv` in the same directory as the input file.
-
-> [!IMPORTANT]
-> This utility is specific to the phenotype prediction task described in the paper and is **irrelevant to the Shared Task**.
 
 # Running the Baselines
 
@@ -207,6 +193,25 @@ python evaluate.py \
   --split_file splits/val.txt \
   --stats_csv MedDec/stats.csv
 ```
+
+# Additional Notes
+
+These sections refer to the phenotype prediction task described in the paper, which is separate from the decision extraction Shared Task.
+
+### Phenotypes Annotations
+
+The phenotype annotations used in the paper are available here: [https://physionet.org/content/phenotype-annotations-mimic/1.20.03/](https://physionet.org/content/phenotype-annotations-mimic/1.20.03/).
+
+### Aggregate Phenotype Annotations
+
+To preprocess the phenotype annotations, run the following command:
+```
+python preprocess_phenos.py <phenotypes_path (ACTdb102003.csv)>
+```
+- `phenotypes_path`: Path to the phenotype annotations. The aggregated annotations will be written to `phenos.csv` in the same directory as the input file.
+
+> [!IMPORTANT]
+> This utility is specific to the phenotype prediction task described in the paper and is **irrelevant to the Shared Task**.
 
 # Citation
 
