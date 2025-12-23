@@ -6,6 +6,14 @@ This is the code and dataset described in **[MedDec (Elgaar et al., Findings of 
 
 MedDec is the first dataset specifically developed for extracting and classifying medical decisions from clinical notes. It includes 451 expert-annotated annotated discharge summaries from the MIMIC-III dataset, offering a valuable resource for understanding and facilitating clinical decision-making.
 
+## Table of Contents
+- [Dataset](#dataset)
+- [Prerequisites](#prerequisites)
+- [Utilities](#utilities)
+- [Running the Baselines](#running-the-baselines)
+- [Shared Task](#shared-task)
+- [Citation](#citation)
+
 # Dataset
 
 > [!TIP]
@@ -29,6 +37,10 @@ pip install -r requirements.txt
 > [!NOTE]
 > This repository requires **Python 3**. If your system does not have `python` / `pip` pointing to Python 3, use `python3` / `pip3` in the commands below.
 
+# Utilities
+
+These utilities are generally useful for working with the MedDec dataset and MIMIC-III, regardless of whether you are participating in the Shared Task.
+
 ### Extract Notes Text from MIMIC-III
 
 To extract the notes text from the MIMIC-III dataset, run the following command:
@@ -38,6 +50,32 @@ python extract_texts.py <data_dir> <notes_path (NOTEEVENTS.csv)>
 - `data_dir`: Directory where the dataset is stored.
 - `notes_path`: Path to the `NOTEEVENTS.csv` file. The texts will be written to the `data_dir/raw_text` directory.
 
+### Generate Statistics for Subgroup Analysis
+
+The `generate_stats.py` script builds a `stats.csv` file keyed by `(SUBJECT_ID, HADM_ID, ROW_ID)` containing demographic information (sex, race, language). This is generally useful for demographic analysis of MIMIC-III notes and is required for the Shared Task subgroup scoring.
+
+To generate `stats.csv`, you need local access to MIMIC-III tables `ADMISSIONS` and `PATIENTS` (either `.csv` or `.csv.gz`):
+```
+python generate_stats.py <meddec_dir> <mimic_dir> [output_path]
+```
+
+Example:
+```
+python generate_stats.py MedDec /path/to/mimic-iii-1.4 MedDec/stats.csv
+```
+
+### Clean Data
+
+The `clean_data.py` script rewrites MedDec annotation offsets to better align with word boundaries and strips leading/trailing punctuation.
+It:
+- moves `MedDec/data` → `MedDec/data_unclean` (one-time)
+- writes cleaned JSON files back into `MedDec/data`
+
+Run:
+```
+python clean_data.py --data_dir MedDec
+```
+
 ### Aggregate Phenotype Annotations
 
 To preprocess the phenotype annotations, run the following command:
@@ -45,6 +83,9 @@ To preprocess the phenotype annotations, run the following command:
 python preprocess_phenos.py <phenotypes_path (ACTdb102003.csv)>
 ```
 - `phenotypes_path`: Path to the phenotype annotations. The aggregated annotations will be written to `phenos.csv` in the same directory as the input file.
+
+> [!IMPORTANT]
+> This utility is specific to the phenotype prediction task described in the paper and is **irrelevant to the Shared Task**.
 
 # Running the Baselines
 
@@ -157,7 +198,7 @@ python evaluate.py \
   --output results.json
 ```
 
-Optional: shared-task final score with subgroup (worst-group) adjustment (requires `stats.csv`, see below):
+Optional: shared-task final score with subgroup (worst-group) adjustment (requires `stats.csv` from [Utilities](#generate-statistics-for-subgroup-analysis)):
 ```
 python evaluate.py \
   --gold_dir MedDec/data \
@@ -166,36 +207,6 @@ python evaluate.py \
   --split_file splits/val.txt \
   --stats_csv MedDec/stats.csv
 ```
-
-## `generate_stats.py` (build `stats.csv` for subgroup scoring)
-
-`evaluate.py --stats_csv ...` uses a `stats.csv` file keyed by `(SUBJECT_ID, HADM_ID, ROW_ID)` to compute subgroup scores for:
-- sex (Female/Male)
-- race (White/African American/Hispanic/Asian/Other)
-- language (English/Non-English)
-
-To generate `stats.csv` you need local access to MIMIC-III tables `ADMISSIONS` and `PATIENTS` (either `.csv` or `.csv.gz`):
-```
-python generate_stats.py <meddec_dir> <mimic_dir> [output_path]
-```
-
-Example:
-```
-python generate_stats.py MedDec /path/to/mimic-iii-1.4 MedDec/stats.csv
-```
-
-## `clean_data.py` (optional: normalize gold span boundaries)
-
-This script rewrites MedDec annotation offsets to better align with word boundaries and strips leading/trailing punctuation. It:
-- moves `MedDec/data` → `MedDec/data_unclean` (one-time)
-- writes cleaned JSON files back into `MedDec/data`
-
-Run:
-```
-python clean_data.py --data_dir MedDec
-```
-
-
 
 # Citation
 
