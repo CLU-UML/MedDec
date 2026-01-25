@@ -137,6 +137,12 @@ The evaluator expects a JSON **list** with this schema:
 - `start_offset`, `end_offset`: character offsets into the raw discharge summary text (0-based; `[start_offset, end_offset)` )
 - `category`: integer decision category ID (1–9)
 
+> [!IMPORTANT]
+> **Shared task categories are 1-9 only.** Some MedDec annotations may include additional
+> labels such as **Category 10 (Legal/insurance related)** and **Category 11 (Others)**.
+> These are **out of scope for the shared task**. The official evaluator (`evaluate.py`) **ignores**
+> gold/pred spans whose category ID is not in 1-9.
+
 An example file in the correct format is provided in `predictions_validation.json` (useful for sanity-checking your setup).
 
 ## `evaluate.py` (official evaluator)

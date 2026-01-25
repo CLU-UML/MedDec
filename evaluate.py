@@ -17,6 +17,7 @@ import re
 import nltk
 from nltk.tokenize import word_tokenize, TreebankWordTokenizer
 
+VALID_CATEGORY_IDS = set(range(1, 10))  # Shared task label space: 1–9 only.
 
 # Download required NLTK data
 try:
@@ -34,10 +35,17 @@ except (LookupError, OSError):
 
 
 def parse_category(category_str):
-    """Extract category number from category string like 'Category 3: Defining problem'."""
+    """Extract category ID from gold strings like 'Category 3: Defining problem'.
+
+    Notes:
+    - The shared task label space is Category 1-9.
+    - Gold annotations may include Category 10/11 (e.g., legal/insurance, other);
+      these are treated as out-of-scope and mapped to 0 so they are ignored.
+    """
     match = re.match(r'Category\s*(\d+)', category_str)
     if match:
-        return int(match.group(1))
+        cat = int(match.group(1))
+        return cat if cat in VALID_CATEGORY_IDS else 0
     return 0
 
 
@@ -139,6 +147,8 @@ def build_refined_span_sets(gold_annotations, predictions, raw_texts):
             start = int(ann.get('start_offset', 0))
             end = int(ann.get('end_offset', 0))
             label = parse_category(ann.get('category', 0))
+            if label == 0:
+                continue
 
             refined_start, refined_end = refine_span(raw_text, start, end)
             if refined_start is not None:
@@ -153,6 +163,8 @@ def build_refined_span_sets(gold_annotations, predictions, raw_texts):
             start = int(pred.get('start_offset', 0))
             end = int(pred.get('end_offset', 0))
             label = int(pred.get('category', 0))
+            if label not in VALID_CATEGORY_IDS:
+                continue
 
             refined_start, refined_end = refine_span(raw_text, start, end)
             if refined_start is not None:
@@ -430,6 +442,8 @@ def compute_span_f1(gold_annotations, predictions, raw_texts):
             start = int(ann.get('start_offset', 0))
             end = int(ann.get('end_offset', 0))
             label = parse_category(ann.get('category', 0))
+            if label == 0:
+                continue
             
             refined_start, refined_end = refine_span(raw_text, start, end)
             if refined_start is not None:
@@ -442,6 +456,8 @@ def compute_span_f1(gold_annotations, predictions, raw_texts):
             start = int(pred.get('start_offset', 0))
             end = int(pred.get('end_offset', 0))
             label = int(pred.get('category', 0))
+            if label not in VALID_CATEGORY_IDS:
+                continue
             
             refined_start, refined_end = refine_span(raw_text, start, end)
             if refined_start is not None:
@@ -502,6 +518,9 @@ def assign_token_labels(tokens, annotations, is_gold=True):
             label = parse_category(ann.get('category', 0))
         else:
             label = int(ann.get('category', 0))
+
+        if label not in VALID_CATEGORY_IDS:
+            continue
         
         for i, token in enumerate(tokens):
             # Check if token overlaps with annotation span
