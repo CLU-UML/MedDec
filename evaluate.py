@@ -306,7 +306,8 @@ def load_gold_annotations(gold_file):
     if isinstance(data, dict) and 'annotations' in data:
         # Single file format
         file_name = data.get('discharge_summary_id', os.path.basename(gold_file).replace('.json', ''))
-        file_name = file_name.rstrip("_")
+        parts = file_name.split("_")
+        file_name = "_".join(parts[:3])
         return {file_name: data['annotations']}
     elif isinstance(data, list):
         # List of files
@@ -615,6 +616,7 @@ def main():
         with open(args.split_file, 'r') as f:
             for line in f:
                 line = line.strip()
+                line = line.removesuffix('.json')
                 split_ids.add(line)
         
         gold_annotations = {k: v for k, v in gold_annotations.items() if k in split_ids}
